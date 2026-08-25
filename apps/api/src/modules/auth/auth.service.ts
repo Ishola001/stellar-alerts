@@ -1,9 +1,15 @@
 import { prisma } from '../../lib/prisma';
 import { generateMagicToken, generateSessionToken, verifyToken, MagicLinkPayload } from '../../utils/jwt';
+import { redis } from '../../lib/redis';
+import jwt from 'jsonwebtoken';
 
 export class AuthService {
   async requestMagicLink(email: string): Promise<string> {
     const token = generateMagicToken(email);
+    const decoded = jwt.decode(token) as MagicLinkPayload;
+    if (decoded && decoded.jti) {
+      await redis.set(`magic_token:${decoded.jti}`, 'valid', 'EX', 15 * 60);
+    }
     console.log(`[AuthService] ✉️ Magic link generated: http://localhost:3000/verify?token=${token}`);
     return token;
   }
@@ -17,10 +23,20 @@ export class AuthService {
       throw new Error('Invalid or expired token');
     }
 
-    if (!decoded || !decoded.email) {
-      console.error('[AuthService] Token payload missing email:', decoded);
+    if (!decoded || !decoded.email || !decoded.jti) {
+      console.error('[AuthService] Token payload missing email or jti:', decoded);
       throw new Error('Invalid or expired token');
     }
+
+    const redisKey = `magic_token:${decoded.jti}`;
+    const tokenStatus = await redis.get(redisKey);
+
+    if (!tokenStatus) {
+      console.error('[AuthService] Token already used or expired (jti not found in Redis):', decoded.jti);
+      throw new Error('Invalid or expired token');
+    }
+
+    await redis.del(redisKey);
 
     try {
       const user = await prisma.user.upsert({
