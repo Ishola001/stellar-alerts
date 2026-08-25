@@ -19,8 +19,8 @@ export class PaymentsService {
     });
     
     return {
-      totalReceived: result._sum.amount || 0,
-      paymentCount: result._count.id || 0,
+      volume: Number(result._sum.amount) || 0,
+      count: result._count.id || 0,
     };
   }
 }
