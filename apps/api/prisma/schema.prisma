@@ -49,6 +49,9 @@ model Payment {
   memo        String?
   receivedAt  DateTime
   createdAt   DateTime @default(now())
+
+  @@index([txHash])
+  @@index([receivedAt])
 }
 
 model NotificationPreference {
@@ -60,6 +63,7 @@ model NotificationPreference {
   emailEnabled    Boolean @default(true)
   whatsappNumber  String?
   whatsappEnabled Boolean @default(false)
+  language        String  @default("EN")
 }
 
 model Webhook {

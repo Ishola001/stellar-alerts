@@ -200,6 +200,59 @@ export async function dispatchWebhookAndLog(webhookId: string, payload: any) {
   }
 }
 
+export const paymentAlertWorkerProcessor = async (job: { data: AlertJobData }) => {
+  const data = job.data;
+  
+  const { data: resendData, error } = await resend.emails.send({
+    from: 'Stellar Alerts <alerts@resend.dev>',
+    to: [data.fromAddress],
+    subject: `Payment Receipt: ${data.amount} ${data.asset}`,
+    html: `
+      <h1>Payment Receipt</h1>
+      <p><strong>Payment ID:</strong> ${data.paymentId}</p>
+      <p><strong>Transaction Hash:</strong> ${data.txHash}</p>
+      <p><strong>Amount:</strong> ${data.amount} ${data.asset}</p>
+      <p><strong>From Address:</strong> ${data.fromAddress}</p>
+      <p><strong>Received At:</strong> ${data.receivedAt}</p>
+    `,
+  });
+
+  if (error) {
+    throw new Error(`Resend Error: ${error.message}`);
+  }
+  
+  console.log(`[Worker] Sent email receipt for ${data.paymentId}`);
+
+  try {
+    const payment = await prisma.payment.findUnique({
+      where: { id: data.paymentId },
+      include: { wallet: { include: { user: { include: { notifyPrefs: true } } } } }
+    });
+
+    if (payment?.wallet?.user?.notifyPrefs?.telegramEnabled && payment.wallet.user.notifyPrefs.telegramChatId) {
+      const chatId = payment.wallet.user.notifyPrefs.telegramChatId;
+      const botToken = process.env.TELEGRAM_BOT_TOKEN || 'mock_token';
+      const message = `Payment Receipt:\nAmount: ${data.amount} ${data.asset}\nFrom: ${data.fromAddress}`;
+      
+      const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: message })
+      });
+      
+      if (!response.ok) {
+        console.warn(`[Worker] Failed to send Telegram message for ${data.paymentId}`);
+      } else {
+        console.log(`[Worker] Sent Telegram receipt for ${data.paymentId}`);
+      }
+    }
+  } catch (dbErr: any) {
+    console.warn(`[Worker] Failed to check Telegram preferences for ${data.paymentId}: ${dbErr.message}`);
+  }
+
+  return resendData;
+};
+
 try {
   const connection = {
     host: redisHost,
@@ -306,10 +359,11 @@ try {
           `[Queue] 📨 Moved failed job ${jobId} to DLQ. Reason: ${failedReason}`,
         );
       }
-    } catch (e: any) {
-      console.warn(`[Queue] Could not route job ${jobId} to DLQ: ${e.message}`);
     }
-  });
+  } catch (err: any) {
+    console.warn(`[Worker] Failed to dispatch Slack alerts for ${data.paymentId}: ${err.message}`);
+  }
+}
 
   console.log(
     `[Queue] 📡 BullMQ payment-alerts queue initialized (${redisHost}:${redisPort})`,

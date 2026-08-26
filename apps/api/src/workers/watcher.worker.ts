@@ -153,10 +153,9 @@ export async function processWalletPayments(wallet: {
         cursor = record.paging_token;
         await saveCursor(wallet.id, cursor);
       }
-    }
 
-    if (records.length < CURSOR_PAGE_SIZE) return;
-  }
+      if (records.length < CURSOR_PAGE_SIZE) return;
+    }
 
   console.warn(
     `[WatcherWorker] Catch-up page limit reached for ${wallet.publicKey.substring(0, 8)}..., resuming next poll from ${cursor}`,
@@ -171,10 +170,23 @@ export async function startHorizonSSEStream(wallet: {
     `[WatcherWorker] 📡 Opening Horizon SSE payment stream for wallet ${wallet.publicKey.substring(0, 8)}...`,
   );
 
+  let timeoutId: NodeJS.Timeout;
+  let closeStream: (() => void) | undefined;
+
+  const resetHeartbeat = () => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => {
+      console.warn(`[WatcherStream] ⚠️ Heartbeat timeout for ${wallet.publicKey.substring(0, 8)}... Reconnecting...`);
+      if (closeStream) closeStream();
+      startHorizonSSEStream(wallet);
+    }, 60000);
+  };
+
   try {
     const cursor = await ensureCursor(wallet);
+    resetHeartbeat();
 
-    const closeStream = stellar.server
+    closeStream = stellar.server
       .payments()
       .forAccount(wallet.publicKey)
       .cursor(cursor)
@@ -194,11 +206,18 @@ export async function startHorizonSSEStream(wallet: {
             error,
           );
         },
-      });
+      }) as unknown as () => void; // cast to avoid typings issues since stellar-sdk types might vary
+
+    const originalClose = closeStream;
+    closeStream = () => {
+      clearTimeout(timeoutId);
+      if (originalClose) originalClose();
+    };
 
     return closeStream;
   } catch (err: any) {
     console.error(`[WatcherStream] Failed to open SSE stream: ${err.message}`);
+    clearTimeout(timeoutId!);
     return null;
   }
 }
@@ -327,5 +346,6 @@ async function processSorobanContractEvents(contractId: string) {
 }
 
 if (require.main === module) {
+  registerSupervisorHeartbeat();
   runWatcher();
 }
