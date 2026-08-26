@@ -86,7 +86,7 @@ async function updateCircuitBreakerState(
   });
 }
 
-async function dispatchWebhookAndLog(webhookId: string, payload: any) {
+export async function dispatchWebhookAndLog(webhookId: string, payload: any) {
   try {
     const webhook = await prisma.webhook.findUnique({
       where: { id: webhookId },
