@@ -64,6 +64,7 @@ model NotificationPreference {
   whatsappNumber  String?
   whatsappEnabled Boolean @default(false)
   language        String  @default("EN")
+  filterRules     Json?   // Stores filter rule group as JSON
 }
 
 model Webhook {

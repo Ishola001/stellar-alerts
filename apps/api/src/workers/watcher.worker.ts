@@ -1,28 +1,21 @@
-import * as StellarSdk from "stellar-sdk";
-import { prisma } from "../lib/prisma";
-import {
-  stellar,
-  decodeHorizonAsset,
-  parseSacTransferEvent,
-} from "../lib/stellar";
-import { enqueuePaymentAlert } from "../lib/queue";
-import {
-  getSorobanLatestLedger,
-  loadContractRegistry,
-  routeEventToUsers,
-  parseSorobanTransferEvent,
-  getActiveContractIds,
-} from "../lib/soroban";
+import * as StellarSdk from 'stellar-sdk';
+import { prisma, connectWithRetry } from '../lib/prisma';
+import { stellar, decodeHorizonAsset, parseSacTransferEvent } from '../lib/stellar';
+import { enqueuePaymentAlert } from '../lib/queue';
+import { getSorobanLatestLedger } from '../lib/soroban';
+import { withWalletLock } from '../lib/lock';
+import { shouldAlert, PaymentContext } from '../lib/rules-engine';
 
 export async function processPaymentRecord(
-  wallet: { id: string; publicKey: string },
-  record: any,
+  wallet: { id: string; publicKey: string; userId?: string },
+  record: any
 ) {
   let amount: string | undefined;
   let asset: string = "XLM";
   let assetIssuer: string | null = null;
-  let fromAddress: string = "";
-  const txHash: string = record.transaction_hash || record.hash || "";
+  let fromAddress: string = '';
+  let memo: string | null = null;
+  const txHash: string = record.transaction_hash || record.hash || '';
   const receivedAt: Date = new Date(record.created_at || Date.now());
 
   if (record.type === "payment") {
@@ -30,8 +23,9 @@ export async function processPaymentRecord(
     amount = record.amount;
     asset = decodedAsset.assetCode;
     assetIssuer = decodedAsset.assetIssuer;
-    fromAddress = record.from || "";
-  } else if (record.type === "create_account") {
+    fromAddress = record.from || '';
+    memo = record.memo || null;
+  } else if (record.type === 'create_account') {
     amount = record.starting_balance;
     asset = "XLM";
     assetIssuer = null;
@@ -66,21 +60,53 @@ export async function processPaymentRecord(
         amount: Number(amount),
         asset,
         assetIssuer,
+        memo,
         receivedAt,
       },
     });
 
-    // Enqueue off-chain alert dispatch job to BullMQ queue
-    await enqueuePaymentAlert({
-      paymentId: payment.id,
-      txHash,
-      walletId: wallet.id,
-      amount,
-      asset,
-      assetIssuer,
-      fromAddress,
-      receivedAt: receivedAt.toISOString(),
-    });
+    // Apply filter rules to determine if we should alert
+    let shouldSendAlert = true;
+    
+    if (wallet.userId) {
+      const notifyPrefs = await prisma.notificationPreference.findUnique({
+        where: { userId: wallet.userId },
+      });
+
+      if (notifyPrefs?.filterRules) {
+        const paymentContext: PaymentContext = {
+          amount: Number(amount),
+          asset,
+          fromAddress,
+          memo,
+        };
+        
+        shouldSendAlert = shouldAlert(notifyPrefs.filterRules as any, paymentContext);
+        
+        if (!shouldSendAlert) {
+          console.log(
+            `[WatcherWorker] 🔕 Payment filtered by rules for wallet (${wallet.publicKey.substring(
+              0,
+              8
+            )}...): ${amount} ${asset}`
+          );
+        }
+      }
+    }
+
+    // Enqueue off-chain alert dispatch job to BullMQ queue only if rules pass
+    if (shouldSendAlert) {
+      await enqueuePaymentAlert({
+        paymentId: payment.id,
+        txHash,
+        walletId: wallet.id,
+        amount,
+        asset,
+        assetIssuer,
+        fromAddress,
+        receivedAt: receivedAt.toISOString(),
+      });
+    }
   }
 }
 
@@ -123,17 +149,9 @@ export async function ensureCursor(wallet: {
   return created.pagingToken;
 }
 
-export async function processWalletPayments(wallet: {
-  id: string;
-  publicKey: string;
-}) {
-  if (
-    !wallet.publicKey ||
-    !StellarSdk.StrKey.isValidEd25519PublicKey(wallet.publicKey)
-  ) {
-    console.warn(
-      `[WatcherWorker] Skipping invalid public key checksum: "${wallet.publicKey}"`,
-    );
+export async function processWalletPayments(wallet: { id: string; publicKey: string; userId?: string }) {
+  if (!wallet.publicKey || !StellarSdk.StrKey.isValidEd25519PublicKey(wallet.publicKey)) {
+    console.warn(`[WatcherWorker] Skipping invalid public key checksum: "${wallet.publicKey}"`);
     return;
   }
 
@@ -162,13 +180,8 @@ export async function processWalletPayments(wallet: {
   );
 }
 
-export async function startHorizonSSEStream(wallet: {
-  id: string;
-  publicKey: string;
-}) {
-  console.log(
-    `[WatcherWorker] 📡 Opening Horizon SSE payment stream for wallet ${wallet.publicKey.substring(0, 8)}...`,
-  );
+export async function startHorizonSSEStream(wallet: { id: string; publicKey: string; userId?: string }) {
+  console.log(`[WatcherWorker] 📡 Opening Horizon SSE payment stream for wallet ${wallet.publicKey.substring(0, 8)}...`);
 
   let timeoutId: NodeJS.Timeout;
   let closeStream: (() => void) | undefined;
@@ -242,7 +255,7 @@ export async function runWatcher() {
         `[WatcherWorker] Checking ${wallets.length} registered wallet(s)...`,
       );
       for (const wallet of wallets) {
-        await processWalletPayments(wallet);
+        await processWalletPayments({ id: wallet.id, publicKey: wallet.publicKey, userId: wallet.userId });
       }
 
       // Process multi-contract Soroban events
