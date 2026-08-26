@@ -4,15 +4,17 @@ import { stellar, decodeHorizonAsset, parseSacTransferEvent } from '../lib/stell
 import { enqueuePaymentAlert } from '../lib/queue';
 import { getSorobanLatestLedger } from '../lib/soroban';
 import { withWalletLock } from '../lib/lock';
+import { shouldAlert, PaymentContext } from '../lib/rules-engine';
 
 export async function processPaymentRecord(
-  wallet: { id: string; publicKey: string },
+  wallet: { id: string; publicKey: string; userId?: string },
   record: any
 ) {
   let amount: string | undefined;
   let asset: string = 'XLM';
   let assetIssuer: string | null = null;
   let fromAddress: string = '';
+  let memo: string | null = null;
   const txHash: string = record.transaction_hash || record.hash || '';
   const receivedAt: Date = new Date(record.created_at || Date.now());
 
@@ -22,6 +24,7 @@ export async function processPaymentRecord(
     asset = decodedAsset.assetCode;
     assetIssuer = decodedAsset.assetIssuer;
     fromAddress = record.from || '';
+    memo = record.memo || null;
   } else if (record.type === 'create_account') {
     amount = record.starting_balance;
     asset = 'XLM';
@@ -57,21 +60,53 @@ export async function processPaymentRecord(
         amount: Number(amount),
         asset,
         assetIssuer,
+        memo,
         receivedAt,
       },
     });
 
-    // Enqueue off-chain alert dispatch job to BullMQ queue
-    await enqueuePaymentAlert({
-      paymentId: payment.id,
-      txHash,
-      walletId: wallet.id,
-      amount,
-      asset,
-      assetIssuer,
-      fromAddress,
-      receivedAt: receivedAt.toISOString(),
-    });
+    // Apply filter rules to determine if we should alert
+    let shouldSendAlert = true;
+    
+    if (wallet.userId) {
+      const notifyPrefs = await prisma.notificationPreference.findUnique({
+        where: { userId: wallet.userId },
+      });
+
+      if (notifyPrefs?.filterRules) {
+        const paymentContext: PaymentContext = {
+          amount: Number(amount),
+          asset,
+          fromAddress,
+          memo,
+        };
+        
+        shouldSendAlert = shouldAlert(notifyPrefs.filterRules as any, paymentContext);
+        
+        if (!shouldSendAlert) {
+          console.log(
+            `[WatcherWorker] 🔕 Payment filtered by rules for wallet (${wallet.publicKey.substring(
+              0,
+              8
+            )}...): ${amount} ${asset}`
+          );
+        }
+      }
+    }
+
+    // Enqueue off-chain alert dispatch job to BullMQ queue only if rules pass
+    if (shouldSendAlert) {
+      await enqueuePaymentAlert({
+        paymentId: payment.id,
+        txHash,
+        walletId: wallet.id,
+        amount,
+        asset,
+        assetIssuer,
+        fromAddress,
+        receivedAt: receivedAt.toISOString(),
+      });
+    }
   }
 }
 
@@ -109,7 +144,7 @@ export async function ensureCursor(wallet: { id: string; publicKey: string }): P
   return created.pagingToken;
 }
 
-export async function processWalletPayments(wallet: { id: string; publicKey: string }) {
+export async function processWalletPayments(wallet: { id: string; publicKey: string; userId?: string }) {
   if (!wallet.publicKey || !StellarSdk.StrKey.isValidEd25519PublicKey(wallet.publicKey)) {
     console.warn(`[WatcherWorker] Skipping invalid public key checksum: "${wallet.publicKey}"`);
     return;
@@ -143,7 +178,7 @@ export async function processWalletPayments(wallet: { id: string; publicKey: str
   });
 }
 
-export async function startHorizonSSEStream(wallet: { id: string; publicKey: string }) {
+export async function startHorizonSSEStream(wallet: { id: string; publicKey: string; userId?: string }) {
   console.log(`[WatcherWorker] 📡 Opening Horizon SSE payment stream for wallet ${wallet.publicKey.substring(0, 8)}...`);
 
   let timeoutId: NodeJS.Timeout;
@@ -211,7 +246,7 @@ export async function runWatcher() {
 
       console.log(`[WatcherWorker] Checking ${wallets.length} registered wallet(s)...`);
       for (const wallet of wallets) {
-        await processWalletPayments(wallet);
+        await processWalletPayments({ id: wallet.id, publicKey: wallet.publicKey, userId: wallet.userId });
       }
     } catch (error) {
       console.error('[WatcherWorker] Polling error:', error);
