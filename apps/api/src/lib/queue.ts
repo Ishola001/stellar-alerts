@@ -347,29 +347,30 @@ try {
     { connection },
   );
 
-  alertQueueEvents.on("failed", async ({ jobId, failedReason }) => {
-    if (!jobId || !alertQueue || !dlqQueue) return;
-    try {
-      const job = await Job.fromId(alertQueue, jobId);
-      if (job && job.attemptsMade >= (job.opts.attempts || 5)) {
-        await dlqQueue.add("dispatch-alert-failed", job.data, {
-          jobId: `dlq-${jobId}`,
-        });
-        console.log(
-          `[Queue] 📨 Moved failed job ${jobId} to DLQ. Reason: ${failedReason}`,
-        );
-      }
-    }
-  } catch (err: any) {
-    console.warn(`[Worker] Failed to dispatch Slack alerts for ${data.paymentId}: ${err.message}`);
-  }
-}
+  alertQueueEvents.on("failed", failedJobHandler);
 
   console.log(
     `[Queue] 📡 BullMQ payment-alerts queue initialized (${redisHost}:${redisPort})`,
   );
 } catch (err: any) {
   console.warn(`[Queue] Could not initialize BullMQ queue: ${err.message}`);
+}
+
+export async function failedJobHandler({ jobId, failedReason }: { jobId?: string; failedReason?: string }) {
+  if (!jobId || !alertQueue || !dlqQueue) return;
+  try {
+    const job = await Job.fromId(alertQueue, jobId);
+    if (job && job.attemptsMade >= (job.opts.attempts || 5)) {
+      await dlqQueue.add("dispatch-alert-failed", job.data, {
+        jobId: `dlq-${jobId}`,
+      });
+      console.log(
+        `[Queue] 📨 Moved failed job ${jobId} to DLQ. Reason: ${failedReason}`,
+      );
+    }
+  } catch (err: any) {
+    console.warn(`[Worker] Failed to handle failed alert job ${jobId}: ${err.message}`);
+  }
 }
 
 export async function enqueuePaymentAlert(data: AlertJobData) {

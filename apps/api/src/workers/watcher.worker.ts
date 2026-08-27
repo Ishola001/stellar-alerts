@@ -2,7 +2,14 @@ import * as StellarSdk from 'stellar-sdk';
 import { prisma, connectWithRetry } from '../lib/prisma';
 import { stellar, decodeHorizonAsset, parseSacTransferEvent } from '../lib/stellar';
 import { enqueuePaymentAlert } from '../lib/queue';
-import { getSorobanLatestLedger } from '../lib/soroban';
+import {
+  getSorobanLatestLedger,
+  loadContractRegistry,
+  getActiveContractIds,
+  parseSorobanTransferEvent,
+  routeEventToUsers,
+} from '../lib/soroban';
+import { registerSupervisorHeartbeat } from './supervisor';
 import { withWalletLock } from '../lib/lock';
 import { shouldAlert, PaymentContext } from '../lib/rules-engine';
 
@@ -73,7 +80,7 @@ export async function processPaymentRecord(
         where: { userId: wallet.userId },
       });
 
-      if (notifyPrefs?.filterRules) {
+      if ((notifyPrefs as any)?.filterRules) {
         const paymentContext: PaymentContext = {
           amount: Number(amount),
           asset,
@@ -81,7 +88,7 @@ export async function processPaymentRecord(
           memo,
         };
         
-        shouldSendAlert = shouldAlert(notifyPrefs.filterRules as any, paymentContext);
+        shouldSendAlert = shouldAlert((notifyPrefs as any)?.filterRules, paymentContext);
         
         if (!shouldSendAlert) {
           console.log(
@@ -171,9 +178,10 @@ export async function processWalletPayments(wallet: { id: string; publicKey: str
         cursor = record.paging_token;
         await saveCursor(wallet.id, cursor);
       }
-
-      if (records.length < CURSOR_PAGE_SIZE) return;
     }
+
+    if (records.length < CURSOR_PAGE_SIZE) return;
+  }
 
   console.warn(
     `[WatcherWorker] Catch-up page limit reached for ${wallet.publicKey.substring(0, 8)}..., resuming next poll from ${cursor}`,
