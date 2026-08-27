@@ -8,8 +8,10 @@
     "packages/*"
   ],
   "scripts": {
+    "dev": "turbo dev",
     "dev:api": "npm run dev --workspace=api",
     "dev:worker": "npm run dev:worker --workspace=api",
+    "dev:reporting": "npm run dev:reporting --workspace=api",
     "dev:web": "npm run dev --workspace=web",
     "db:push": "npm run db:push --workspace=api",
     "db:migrate": "npm run db:migrate --workspace=api",
@@ -22,6 +24,7 @@
     "@prisma/client": "^6.19.3"
   },
   "devDependencies": {
-    "turbo": "^2.1.0"
+    "turbo": "^2.1.0",
+    "typescript": "^5.9.3"
   }
 }

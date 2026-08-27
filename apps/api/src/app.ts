@@ -28,6 +28,7 @@ export const buildApp = async () => {
 
   await app.register(cors, {
     origin: true // Allow all origins for dev, or specify 'http://localhost:3000'
+    
   });
 
   await app.register(rateLimit, {
@@ -51,7 +52,7 @@ export const buildApp = async () => {
         { name: 'webhooks', description: 'Custom webhook alert endpoint management' },
       ],
       components: {
-        schemas: openApiComponentSchemas,
+        schemas: openApiComponentSchemas as Record<string, any>,
       },
     },
   });

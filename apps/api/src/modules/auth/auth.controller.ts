@@ -34,6 +34,34 @@ export class AuthController {
     }
   }
 
+  async requestDIDChallenge(request: FastifyRequest, reply: FastifyReply) {
+    const { did } = (request.body as any) || {};
+    if (!did || typeof did !== 'string') {
+      return reply.status(400).send({ error: 'Invalid DID parameter' });
+    }
+
+    try {
+      const challengeObj = authService.requestDIDChallenge(did);
+      return reply.send({ success: true, ...challengeObj });
+    } catch (error: any) {
+      return reply.status(400).send({ error: error.message });
+    }
+  }
+
+  async verifyDIDAuth(request: FastifyRequest, reply: FastifyReply) {
+    const { did, challenge, signature } = (request.body as any) || {};
+    if (!did || !challenge || !signature) {
+      return reply.status(400).send({ error: 'Missing did, challenge, or signature parameters' });
+    }
+
+    try {
+      const result = await authService.verifyDIDAuth(did, challenge, signature);
+      return reply.send({ success: true, ...result });
+    } catch (error: any) {
+      return reply.status(401).send({ error: 'DID Authentication failed', message: error.message });
+    }
+  }
+
   async getMe(request: FastifyRequest, reply: FastifyReply) {
     if (!request.user) {
       return reply.status(401).send({ error: 'Unauthorized', message: 'User not authenticated' });
@@ -46,6 +74,19 @@ export class AuthController {
       if (error.message === 'User not found') {
         return reply.status(404).send({ error: 'Not found', message: 'User not found' });
       }
+      return reply.status(500).send({ error: 'Internal server error', message: error.message });
+    }
+  }
+
+  async logout(request: FastifyRequest, reply: FastifyReply) {
+    if (!request.user) {
+      return reply.status(401).send({ error: 'Unauthorized', message: 'User not authenticated' });
+    }
+
+    try {
+      await authService.revokeSession(request.user);
+      return reply.send({ success: true, message: 'Logged out successfully.' });
+    } catch (error: any) {
       return reply.status(500).send({ error: 'Internal server error', message: error.message });
     }
   }
