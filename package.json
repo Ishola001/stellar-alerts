@@ -8,6 +8,7 @@
     "packages/*"
   ],
   "scripts": {
+    "dev": "turbo dev",
     "dev:api": "npm run dev --workspace=api",
     "dev:worker": "npm run dev:worker --workspace=api",
     "dev:reporting": "npm run dev:reporting --workspace=api",
