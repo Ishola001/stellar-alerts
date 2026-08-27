@@ -2,7 +2,14 @@ import * as StellarSdk from 'stellar-sdk';
 import { prisma, connectWithRetry } from '../lib/prisma';
 import { stellar, decodeHorizonAsset, parseSacTransferEvent } from '../lib/stellar';
 import { enqueuePaymentAlert } from '../lib/queue';
-import { getSorobanLatestLedger } from '../lib/soroban';
+import {
+  getSorobanLatestLedger,
+  loadContractRegistry,
+  getActiveContractIds,
+  parseSorobanTransferEvent,
+  routeEventToUsers,
+} from '../lib/soroban';
+import { registerSupervisorHeartbeat } from './supervisor';
 import { withWalletLock } from '../lib/lock';
 import { shouldAlert, PaymentContext } from '../lib/rules-engine';
 
@@ -116,7 +123,7 @@ export async function processPaymentRecord(
         where: { userId: wallet.userId },
       });
 
-      if (notifyPrefs?.filterRules) {
+      if ((notifyPrefs as any)?.filterRules) {
         const paymentContext: PaymentContext = {
           amount: Number(amount),
           asset,
@@ -124,7 +131,7 @@ export async function processPaymentRecord(
           memo,
         };
         
-        shouldSendAlert = shouldAlert(notifyPrefs.filterRules as any, paymentContext);
+        shouldSendAlert = shouldAlert((notifyPrefs as any)?.filterRules, paymentContext);
         
         if (!shouldSendAlert) {
           console.log(
