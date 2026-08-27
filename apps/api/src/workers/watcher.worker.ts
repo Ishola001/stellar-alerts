@@ -13,48 +13,7 @@ import { registerSupervisorHeartbeat } from './supervisor';
 import { withWalletLock } from '../lib/lock';
 import { shouldAlert, PaymentContext } from '../lib/rules-engine';
 
-// Contract Registry in-memory cache for multi-contract Soroban subscriptions
-let contractRegistry: Map<string, string[]> = new Map();
 
-export async function loadContractRegistry() {
-  try {
-    const subs = await prisma.sorobanContractSubscription.findMany({
-      where: { isActive: true },
-    });
-    const newRegistry = new Map<string, string[]>();
-    for (const sub of subs) {
-      const existing = newRegistry.get(sub.contractId) || [];
-      existing.push(sub.userId);
-      newRegistry.set(sub.contractId, existing);
-    }
-    contractRegistry = newRegistry;
-    console.log(`[SorobanRegistry] Loaded ${contractRegistry.size} active contract subscription(s)`);
-  } catch (err: any) {
-    console.warn(`[SorobanRegistry] Failed to load contract registry: ${err.message}`);
-  }
-}
-
-export function getActiveContractIds(): string[] {
-  return Array.from(contractRegistry.keys());
-}
-
-export function routeEventToUsers(event: any): { topic: string; userIds: string[] }[] {
-  const contractId = event.contractId || event.id || '';
-  const userIds = contractRegistry.get(contractId) || [];
-  return [{ topic: event.topic || 'transfer', userIds }];
-}
-
-export function registerSupervisorHeartbeat() {
-  if (process.send) {
-    setInterval(() => {
-      try {
-        process.send!({ type: 'heartbeat', timestamp: Date.now() });
-      } catch (err) {
-        // ignore broken pipe
-      }
-    }, 10000);
-  }
-}
 
 export async function processPaymentRecord(
   wallet: { id: string; publicKey: string; userId?: string },
