@@ -24,6 +24,7 @@
     "@prisma/client": "^6.19.3"
   },
   "devDependencies": {
-    "turbo": "^2.1.0"
+    "turbo": "^2.1.0",
+    "typescript": "^5.9.3"
   }
 }

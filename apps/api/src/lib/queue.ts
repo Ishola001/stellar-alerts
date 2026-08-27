@@ -347,7 +347,9 @@ try {
     { connection },
   );
 
-  alertQueueEvents.on("failed", failedJobHandler);
+  if (alertQueueEvents) {
+    alertQueueEvents.on("failed", failedJobHandler);
+  }
 
   console.log(
     `[Queue] 📡 BullMQ payment-alerts queue initialized (${redisHost}:${redisPort})`,
@@ -369,7 +371,7 @@ export async function failedJobHandler({ jobId, failedReason }: { jobId?: string
       );
     }
   } catch (err: any) {
-    console.warn(`[Worker] Failed to handle failed alert job ${jobId}: ${err.message}`);
+    console.warn(`[Queue] Failed to process DLQ routing for ${jobId}: ${err.message}`);
   }
 }
 
