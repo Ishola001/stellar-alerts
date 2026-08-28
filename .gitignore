@@ -3,6 +3,8 @@ node_modules
 dist
 build
 .next
+coverage
+apps/**/coverage
 
 dev.db
 *.db
