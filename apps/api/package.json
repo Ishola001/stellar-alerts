@@ -10,7 +10,8 @@
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10",
@@ -19,6 +20,7 @@
     "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.20.0",
     "@types/snarkjs": "^0.7.9",
+    "@vitest/coverage-v8": "^3.2.7",
     "c12": "^3.1.0",
     "fast-check": "^3.23.2",
     "pathe": "^2.0.3",
