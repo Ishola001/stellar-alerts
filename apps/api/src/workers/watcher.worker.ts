@@ -245,49 +245,59 @@ export async function startHorizonSSEStream(wallet: { id: string; publicKey: str
   }
 }
 
+/**
+ * Runs a single payment-catchup + Soroban-event poll cycle. Any error from
+ * a wallet/contract fetch (a chaos-injected network fault, a dropped DB
+ * connection, Horizon timing out, ...) is caught here rather than left to
+ * propagate — this is what keeps a transient upstream fault from becoming
+ * an unhandled rejection that crashes the process; the next scheduled poll
+ * simply tries again. Exported separately from runWatcher so this exact
+ * fault-tolerance behavior is directly unit-testable —
+ * see __tests__/chaos.test.ts.
+ */
+export async function pollOnce(): Promise<void> {
+  try {
+    const wallets = await prisma.wallet.findMany();
+    if (wallets.length === 0) {
+      console.log(
+        "[WatcherWorker] No wallets registered in DB to watch. Waiting for next poll...",
+      );
+      return;
+    }
+
+    console.log(
+      `[WatcherWorker] Checking ${wallets.length} registered wallet(s)...`,
+    );
+    for (const wallet of wallets) {
+      await processWalletPayments({ id: wallet.id, publicKey: wallet.publicKey, userId: wallet.userId });
+    }
+
+    // Process multi-contract Soroban events
+    const contractIds = getActiveContractIds();
+    if (contractIds.length > 0) {
+      console.log(
+        `[WatcherWorker] Processing ${contractIds.length} Soroban contract subscriptions...`,
+      );
+      for (const contractId of contractIds) {
+        await processSorobanContractEvents(contractId);
+      }
+    }
+  } catch (error) {
+    console.error("[WatcherWorker] Polling error:", error);
+  }
+}
+
 export async function runWatcher() {
   console.log("[WatcherWorker] 🚀 Starting Stellar Testnet Watcher Worker...");
 
   // Load Soroban contract subscriptions
   await loadContractRegistry();
 
-  const poll = async () => {
-    try {
-      const wallets = await prisma.wallet.findMany();
-      if (wallets.length === 0) {
-        console.log(
-          "[WatcherWorker] No wallets registered in DB to watch. Waiting for next poll...",
-        );
-        return;
-      }
-
-      console.log(
-        `[WatcherWorker] Checking ${wallets.length} registered wallet(s)...`,
-      );
-      for (const wallet of wallets) {
-        await processWalletPayments({ id: wallet.id, publicKey: wallet.publicKey, userId: wallet.userId });
-      }
-
-      // Process multi-contract Soroban events
-      const contractIds = getActiveContractIds();
-      if (contractIds.length > 0) {
-        console.log(
-          `[WatcherWorker] Processing ${contractIds.length} Soroban contract subscriptions...`,
-        );
-        for (const contractId of contractIds) {
-          await processSorobanContractEvents(contractId);
-        }
-      }
-    } catch (error) {
-      console.error("[WatcherWorker] Polling error:", error);
-    }
-  };
-
   // Initial payment catchup run
-  await poll();
+  await pollOnce();
 
   // Schedule periodic catchup poll every 30 seconds
-  setInterval(poll, 30000);
+  setInterval(pollOnce, 30000);
 
   // Reload contract registry every 5 minutes
   setInterval(() => {
