@@ -29,6 +29,38 @@ export let alertWorker: Worker<AlertJobData> | null = null;
 const resend = new Resend(process.env.RESEND_API_KEY || "re_123");
 const circuitBreakers = new Map<string, CircuitBreaker<any>>();
 
+export function buildTelegramPaymentCard(data: AlertJobData): string {
+  const escapeHtml = (value: string) => value.replace(/[&<>\"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[char] ?? char);
+  return [
+    '<b>Stellar Payment Received</b>',
+    `<b>Amount:</b> ${escapeHtml(data.amount)} ${escapeHtml(data.asset)}`,
+    `<b>From:</b> <code>${escapeHtml(data.fromAddress)}</code>`,
+    `<b>Transaction:</b> <code>${escapeHtml(data.txHash)}</code>`,
+    `<b>Received:</b> ${escapeHtml(data.receivedAt)}`,
+  ].join('\n');
+}
+
+function isPublicChannel(chatId: string): boolean {
+  return chatId.startsWith('@') || chatId.startsWith('-100');
+}
+
+async function assertBotIsChannelAdmin(botToken: string, chatId: string): Promise<void> {
+  const me = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
+  if (!me.ok) throw new Error('Telegram bot identity check failed');
+  const bot = await me.json() as { result?: { id?: number } };
+  if (!bot.result?.id) throw new Error('Telegram bot identity was not returned');
+  const membership = await fetch(
+    `https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${encodeURIComponent(chatId)}&user_id=${bot.result.id}`,
+  );
+  if (!membership.ok) throw new Error('Telegram channel permission check failed');
+  const result = await membership.json() as { result?: { status?: string } };
+  if (!['administrator', 'creator'].includes(result.result?.status ?? '')) {
+    throw new Error('Telegram bot must be an administrator of the channel');
+  }
+}
+
 async function getOrCreateCircuitBreaker(
   webhookId: string,
 ): Promise<CircuitBreaker<any>> {
@@ -232,12 +264,17 @@ export const paymentAlertWorkerProcessor = async (job: { data: AlertJobData }) =
     if (payment?.wallet?.user?.notifyPrefs?.telegramEnabled && payment.wallet.user.notifyPrefs.telegramChatId) {
       const chatId = payment.wallet.user.notifyPrefs.telegramChatId;
       const botToken = process.env.TELEGRAM_BOT_TOKEN || 'mock_token';
-      const message = `Payment Receipt:\nAmount: ${data.amount} ${data.asset}\nFrom: ${data.fromAddress}`;
-      
+      if (isPublicChannel(chatId)) {
+        await assertBotIsChannelAdmin(botToken, chatId);
+      }
       const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: message })
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: isPublicChannel(chatId) ? buildTelegramPaymentCard(data) : `Payment Receipt:\nAmount: ${data.amount} ${data.asset}\nFrom: ${data.fromAddress}`,
+          ...(isPublicChannel(chatId) ? { parse_mode: 'HTML' } : {}),
+        })
       });
       
       if (!response.ok) {
@@ -398,4 +435,3 @@ export async function enqueuePaymentAlert(data: AlertJobData) {
 }
 
 export { dispatchPushNotification } from "../utils/push-protocol";
-
