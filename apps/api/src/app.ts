@@ -4,6 +4,7 @@ import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import prismaPlugin from './plugins/prisma';
+import metricsPlugin from './plugins/metrics';
 import { authRoutes } from './modules/auth/auth.routes';
 import { walletsRoutes } from './modules/wallets/wallets.routes';
 import { paymentsRoutes } from './modules/payments/payments.routes';
@@ -36,6 +37,7 @@ export const buildApp = async () => {
   });
 
   await app.register(prismaPlugin);
+  await app.register(metricsPlugin);
 
   app.get('/health', async () => {
     return { status: 'ok' };
