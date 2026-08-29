@@ -10,6 +10,7 @@ import {
   PaymentTable,
   NotificationModal,
   NetworkVisualizer3D,
+  AuditWorkspace,
 } from '@/components/dashboard';
 
 export default function Home() {
@@ -298,6 +299,15 @@ export default function Home() {
 
           {/* Modular Component 5: NetworkVisualizer3D — live payment stream network */}
           <NetworkVisualizer3D payments={payments} />
+
+          {/* Modular Component 6: AuditWorkspace — multiplayer ledger annotation */}
+          <AuditWorkspace
+            payments={payments}
+            currentUser={{
+              id: (session.user as any)?.id || session.user?.email || 'anonymous',
+              name: session.user?.name || session.user?.email || 'Auditor',
+            }}
+          />
         </main>
 
         {/* Modular Component 4: NotificationModal */}

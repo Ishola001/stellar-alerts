@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
+    "dev:collab": "node ../../node_modules/y-websocket/bin/server.cjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -17,7 +18,10 @@
     "next-auth": "^4.24.14",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "three": "^0.171.0"
+    "three": "^0.171.0",
+    "y-protocols": "^1.0.7",
+    "y-websocket": "^2.1.0",
+    "yjs": "^13.6.32"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
