@@ -22,7 +22,7 @@
     "test": "npm run test --workspaces --if-present",
     "generate:types": "tsx scripts/generate-types.ts",
     "generate:types:check": "tsx scripts/generate-types.ts --check",
-    "security:audit": "tsx scripts/security-audit.ts"
+    "benchmark:stream": "tsx scripts/benchmark-stream.ts"
   },
   "packageManager": "npm@10.8.2",
   "dependencies": {
