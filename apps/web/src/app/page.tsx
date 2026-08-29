@@ -12,6 +12,8 @@ import {
   WalletList,
   PaymentTable,
   NotificationModal,
+  NetworkVisualizer3D,
+  AuditWorkspace,
 } from '@/components/dashboard';
 import { CommandPalette } from '@/components/CommandPalette';
 
@@ -342,6 +344,24 @@ export default function Home() {
                       <PaymentTable payments={payments} isLoading={isLoadingPayments} />
                     </div>
                   </div>
+                ),
+              },
+              {
+                id: 'network-visualizer',
+                label: 'Live Payment Stream Network',
+                content: <NetworkVisualizer3D payments={payments} />,
+              },
+              {
+                id: 'audit-workspace',
+                label: 'Collaborative Audit Workspace',
+                content: (
+                  <AuditWorkspace
+                    payments={payments}
+                    currentUser={{
+                      id: (session.user as any)?.id || session.user?.email || 'anonymous',
+                      name: session.user?.name || session.user?.email || 'Auditor',
+                    }}
+                  />
                 ),
               },
             ]}
