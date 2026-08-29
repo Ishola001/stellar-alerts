@@ -11,6 +11,7 @@ const getPaymentsSchema = z.object({
 
 const getSummarySchema = z.object({
   walletId: z.string().optional(),
+  fiat: z.string().optional(),
 });
 
 export class PaymentsController {
@@ -40,7 +41,11 @@ export class PaymentsController {
       return reply.status(401).send({ error: 'Unauthorized', message: 'User not authenticated' });
     }
 
-    const summary = await paymentsService.getPaymentsSummary(request.user.id, parsed.data.walletId);
+    const summary = await paymentsService.getPaymentsSummary(
+      request.user.id,
+      parsed.data.walletId,
+      parsed.data.fiat,
+    );
     return reply.send({ success: true, summary });
   }
 }

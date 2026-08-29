@@ -5,13 +5,17 @@ import { signOut, useSession } from 'next-auth/react';
 import { WalletDTO, PaymentDTO } from '@stellar-alerts/shared';
 import { WatcherForm } from '@/components/WatcherForm';
 import {
+  DashboardGrid,
   SummaryStats,
+  VolumeChart,
+  WebhookSandbox,
   WalletList,
   PaymentTable,
   NotificationModal,
   NetworkVisualizer3D,
   AuditWorkspace,
 } from '@/components/dashboard';
+import { CommandPalette } from '@/components/CommandPalette';
 
 export default function Home() {
   const { data: session } = useSession();
@@ -30,6 +34,7 @@ export default function Home() {
   const [payments, setPayments] = useState<PaymentDTO[]>([]);
   const [isLoadingPayments, setIsLoadingPayments] = useState<boolean>(false);
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState<boolean>(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
   const [totalVolumeXLM, setTotalVolumeXLM] = useState<number>(0);
   const [totalPaymentsCount, setTotalPaymentsCount] = useState<number>(0);
 
@@ -230,10 +235,23 @@ export default function Home() {
 
             <div className="flex items-center gap-4">
               <button
+                onClick={() => setIsCommandPaletteOpen(true)}
+                title="Search commands (?K)"
+                className="px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-300 flex items-center gap-2 transition-colors cursor-pointer hover:border-cyan-500/40"
+              >
+                <svg className="w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
+                </svg>
+                <span className="hidden sm:inline">Search</span>
+                <kbd className="hidden md:inline-flex items-center px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] font-mono text-gray-400">
+                  ?K
+                </kbd>
+              </button>
+              <button
                 onClick={() => setIsNotificationModalOpen(true)}
                 className="px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-gray-300 flex items-center gap-2 transition-colors cursor-pointer hover:border-cyan-500/40"
               >
-                <span>🔔</span> Alert Settings
+                <span>??</span> Alert Settings
               </button>
               <div className="hidden sm:flex flex-col items-end">
                 <p className="font-semibold text-sm text-gray-200">{session.user?.name || 'Explorer'}</p>
@@ -266,47 +284,87 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Modular Component 1: SummaryStats */}
-          <SummaryStats
-            totalPaymentsCount={totalPaymentsCount || payments.length}
-            totalVolumeXLM={totalVolumeXLM}
-            activeWalletsCount={wallets.length}
-          />
+          {/* Customizable Dashboard Grid ? reorder widgets by dragging their headers */}
+          <DashboardGrid
+            items={[
+              {
+                id: 'summary',
+                label: 'Summary Overview',
+                content: (
+                  <SummaryStats
+                    totalPaymentsCount={totalPaymentsCount || payments.length}
+                    totalVolumeXLM={totalVolumeXLM}
+                    activeWalletsCount={wallets.length}
+                  />
+                ),
+              },
+              {
+                id: 'volume-chart',
+                label: 'Currency Volume',
+                content: (
+                  <VolumeChart
+                    payments={payments}
+                    totalVolumeXLM={totalVolumeXLM}
+                  />
+                ),
+              },
+              {
+                id: 'webhook-sandbox',
+                label: 'Webhook Sandbox',
+                content: <WebhookSandbox />,
+              },
+              {
+                id: 'wallets',
+                label: 'Monitored Wallets',
+                content: (
+                  <WalletList
+                    wallets={wallets}
+                    selectedWalletId={selectedWalletId}
+                    onSelectWallet={(id) => setSelectedWalletId(id)}
+                    onRemoveWallet={handleRemoveWallet}
+                    onOpenAddModal={() => {
+                      const el = document.getElementById('add-wallet-section');
+                      if (el) el.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                  />
+                ),
+              },
+              {
+                id: 'watcher-and-payments',
+                label: 'Watcher & Payment Ledger',
+                content: (
+                  <div id="add-wallet-section" className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                    {/* Watcher Form Card */}
+                    <div className="lg:col-span-4 bg-[#0c0c14]/80 backdrop-blur-md rounded-3xl border border-white/10 p-7 shadow-2xl hover:border-cyan-500/30 transition-all duration-500">
+                      <WatcherForm onWalletAdded={() => { fetchWallets(); fetchPayments(); fetchSummary(); }} />
+                    </div>
 
-          {/* Modular Component 2: WalletList */}
-          <WalletList
-            wallets={wallets}
-            selectedWalletId={selectedWalletId}
-            onSelectWallet={(id) => setSelectedWalletId(id)}
-            onRemoveWallet={handleRemoveWallet}
-            onOpenAddModal={() => {
-              const el = document.getElementById('add-wallet-section');
-              if (el) el.scrollIntoView({ behavior: 'smooth' });
-            }}
-          />
-
-          <div id="add-wallet-section" className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            {/* Watcher Form Card */}
-            <div className="lg:col-span-4 bg-[#0c0c14]/80 backdrop-blur-md rounded-3xl border border-white/10 p-7 shadow-2xl hover:border-cyan-500/30 transition-all duration-500">
-              <WatcherForm onWalletAdded={() => { fetchWallets(); fetchPayments(); fetchSummary(); }} />
-            </div>
-
-            {/* Modular Component 3: PaymentTable */}
-            <div className="lg:col-span-8">
-              <PaymentTable payments={payments} isLoading={isLoadingPayments} />
-            </div>
-          </div>
-
-          {/* Modular Component 5: NetworkVisualizer3D — live payment stream network */}
-          <NetworkVisualizer3D payments={payments} />
-
-          {/* Modular Component 6: AuditWorkspace — multiplayer ledger annotation */}
-          <AuditWorkspace
-            payments={payments}
-            currentUser={{
-              id: (session.user as any)?.id || session.user?.email || 'anonymous',
-              name: session.user?.name || session.user?.email || 'Auditor',
-            }}
+                    {/* Modular Component 3: PaymentTable */}
+                    <div className="lg:col-span-8">
+                      <PaymentTable payments={payments} isLoading={isLoadingPayments} />
+                    </div>
+                  </div>
+                ),
+              },
+              {
+                id: 'network-visualizer',
+                label: 'Live Payment Stream Network',
+                content: <NetworkVisualizer3D payments={payments} />,
+              },
+              {
+                id: 'audit-workspace',
+                label: 'Collaborative Audit Workspace',
+                content: (
+                  <AuditWorkspace
+                    payments={payments}
+                    currentUser={{
+                      id: (session.user as any)?.id || session.user?.email || 'anonymous',
+                      name: session.user?.name || session.user?.email || 'Auditor',
+                    }}
+                  />
+                ),
+              },
+            ]}
           />
         </main>
 
@@ -316,11 +374,69 @@ export default function Home() {
           onClose={() => setIsNotificationModalOpen(false)}
           onSavePreferences={handleSavePreferences}
         />
+
+        {/* Command Palette ? press ?K / Ctrl+K to navigate & run quick actions */}
+        <CommandPalette
+          open={isCommandPaletteOpen}
+          onOpenChange={setIsCommandPaletteOpen}
+          groups={[
+            {
+              id: 'navigation',
+              label: 'Navigation',
+              items: [
+                {
+                  id: 'add-wallet',
+                  label: 'Add a wallet',
+                  keywords: ['watch', 'monitor', 'track', 'new wallet'],
+                  shortcut: 'G W',
+                  icon: (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                    </svg>
+                  ),
+                  onSelect: () => {
+                    const el = document.getElementById('add-wallet-section');
+                    if (el) el.scrollIntoView({ behavior: 'smooth' });
+                  },
+                },
+                {
+                  id: 'alert-settings',
+                  label: 'Alert settings',
+                  keywords: ['notification', 'telegram', 'email', 'preferences', 'bell'],
+                  shortcut: 'G A',
+                  icon: (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                    </svg>
+                  ),
+                  onSelect: () => setIsNotificationModalOpen(true),
+                },
+              ],
+            },
+            {
+              id: 'account',
+              label: 'Account',
+              items: [
+                {
+                  id: 'sign-out',
+                  label: 'Sign out',
+                  keywords: ['logout', 'exit', 'session'],
+                  icon: (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                  ),
+                  onSelect: () => void signOut(),
+                },
+              ],
+            },
+          ]}
+        />
       </div>
     );
   }
 
-  // Unauthenticated State — World-Class Landing Page
+  // Unauthenticated State ? World-Class Landing Page
   return (
     <div className="min-h-screen bg-[#030307] text-gray-100 font-sans selection:bg-cyan-500/30 overflow-x-hidden relative">
       {/* Background Ambient Glows & Grid Pattern */}
@@ -373,7 +489,7 @@ export default function Home() {
           <svg className="w-4 h-4 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
-          Horizon Network Ingestion • Zero-Delay Alerts
+          Horizon Network Ingestion ? Zero-Delay Alerts
         </div>
 
         <h1 className="text-5xl sm:text-6xl md:text-7xl font-extrabold tracking-tight text-white max-w-5xl mx-auto leading-[1.1] mb-8">
@@ -486,7 +602,7 @@ export default function Home() {
                     href={devMagicUrl}
                     className="block w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs text-center shadow-lg transition-all cursor-pointer"
                   >
-                    ⚡ Click to Authenticate Instantly
+                    ? Click to Authenticate Instantly
                   </a>
                 </div>
               )}
@@ -746,7 +862,7 @@ export default function Home() {
                     href={devMagicUrl}
                     className="block w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs text-center shadow-lg transition-all cursor-pointer mt-2"
                   >
-                    ⚡ Click to Authenticate Instantly (Dev)
+                    ? Click to Authenticate Instantly (Dev)
                   </a>
                 )}
               </div>
@@ -766,7 +882,7 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-2">
             <span className="text-sm font-bold text-white">StellarAlerts</span>
-            <span className="text-xs text-gray-500">— Non-Custodial Stellar Payment Tracker</span>
+            <span className="text-xs text-gray-500">? Non-Custodial Stellar Payment Tracker</span>
           </div>
           <p className="text-xs text-gray-500">Released under the MIT License</p>
         </div>

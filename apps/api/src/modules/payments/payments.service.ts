@@ -1,5 +1,10 @@
 import { prisma } from '../../lib/prisma';
 import { addDifferentialPrivacyNoise } from '../../utils/differential-privacy';
+import {
+  convertUsdToFiat,
+  isSupportedFiatCurrency,
+  type SupportedFiatCurrency,
+} from '../../lib/exchange-rates';
 
 export class PaymentsService {
   /**
@@ -20,7 +25,7 @@ export class PaymentsService {
     });
   }
 
-  async getPaymentsSummary(userId: string, walletId?: string) {
+  async getPaymentsSummary(userId: string, walletId?: string, fiatCurrency?: string) {
     console.log(
       `[PaymentsService] Fetching summary for user ${userId}${walletId ? ` (wallet ${walletId})` : ' (all wallets)'}`,
     );
@@ -29,11 +34,29 @@ export class PaymentsService {
       _sum: { amount: true },
       _count: { id: true },
     });
-    
-    return {
-      totalReceived: result._sum.amount || 0,
-      paymentCount: result._count.id || 0,
+
+    const totalReceivedUsd = Number(result._sum.amount || 0);
+    const paymentCount = result._count.id || 0;
+
+    const summary: Record<string, unknown> = {
+      totalReceived: totalReceivedUsd,
+      paymentCount,
     };
+
+    // Fiat conversion when requested
+    if (fiatCurrency && isSupportedFiatCurrency(fiatCurrency)) {
+      const conversion = await convertUsdToFiat(
+        totalReceivedUsd,
+        fiatCurrency as SupportedFiatCurrency,
+      );
+      summary.fiatConversion = {
+        currency: conversion.currency,
+        convertedTotal: conversion.convertedAmount,
+        exchangeRate: conversion.rate,
+      };
+    }
+
+    return summary;
   }
 
   /**

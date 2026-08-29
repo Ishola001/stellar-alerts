@@ -1,5 +1,11 @@
 import * as StellarSdk from "stellar-sdk";
 import { prisma } from "./prisma";
+import {
+  hashMerkleLeaf,
+  verifyMerkleProof,
+  MerkleProofStep,
+} from "../utils/merkle-verifier";
+import { decodeScAddress, decodeScAmount, formatTokenAmount } from "./stellar";
 
 const SOROBAN_RPC_URL =
   process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
@@ -149,6 +155,50 @@ export function getContractSubscriberCount(contractId: string): number {
 /**
  * Fetches latest ledger sequence from Soroban RPC endpoint.
  */
+export interface SorobanContractStateProofInput {
+  /** Base64-encoded XDR of the ledger entry's key (xdr.LedgerKey). */
+  ledgerKeyXdr: string;
+  /** Base64-encoded XDR of the ledger entry's value (xdr.LedgerEntryData). */
+  ledgerEntryXdr: string;
+  /** Inclusion proof path from the entry's leaf hash up to the ledger's state root. */
+  proof: MerkleProofStep[];
+  /**
+   * Hex-encoded state root to verify against — the target ledger header's
+   * bucketListHash (xdr.LedgerHeader.bucketListHash), the Stellar protocol's
+   * cryptographic commitment to the full ledger state at that ledger.
+   */
+  ledgerStateRoot: string;
+}
+
+/**
+ * Computes the canonical Merkle leaf hash for a Soroban contract storage
+ * entry: the SHA-256 (leaf-domain-separated) hash of its key XDR
+ * concatenated with its value XDR. Binding both means the proof commits to
+ * the *exact* stored value, not just the fact that some value exists for
+ * that key.
+ */
+export function hashSorobanLedgerEntry(ledgerKeyXdr: string, ledgerEntryXdr: string): string {
+  const keyBytes = Buffer.from(ledgerKeyXdr, "base64");
+  const entryBytes = Buffer.from(ledgerEntryXdr, "base64");
+  return hashMerkleLeaf(Buffer.concat([keyBytes, entryBytes]));
+}
+
+/**
+ * Cryptographically verifies that a Soroban contract storage entry is
+ * included in a ledger's state, given an inclusion proof and that ledger's
+ * state root — without needing to run a full node. Never throws: any
+ * malformed input (bad base64/XDR, malformed proof, wrong root format)
+ * simply fails verification.
+ */
+export function verifySorobanContractStateProof(input: SorobanContractStateProofInput): boolean {
+  try {
+    const leafHash = hashSorobanLedgerEntry(input.ledgerKeyXdr, input.ledgerEntryXdr);
+    return verifyMerkleProof({ leafHash, path: input.proof }, input.ledgerStateRoot);
+  } catch {
+    return false;
+  }
+}
+
 export async function getSorobanLatestLedger(): Promise<number> {
   try {
     const health = await sorobanServer.getLatestLedger();
@@ -244,6 +294,93 @@ export async function* fetchContractEventsInRange(
   }
 }
 
+export interface ParsedSorobanSwap {
+  contractId: string;
+  tokenIn: string;
+  tokenOut: string;
+  amountIn: string;
+  amountOut: string;
+  /**
+   * Price impact of the swap as a percentage string (e.g. "2.35" = 2.35%),
+   * taken directly from the event when the contract reports it. Null when
+   * the event doesn't include enough pricing context to know it.
+   */
+  priceImpactPct: string | null;
+  ledgerSeq?: number;
+  txHash?: string;
+}
+
+function extractSwapTopicValue(topicEntry: any): string | null {
+  if (typeof topicEntry === "string") return topicEntry;
+  if (topicEntry && typeof topicEntry === "object" && typeof topicEntry.symbol === "string") {
+    return topicEntry.symbol;
+  }
+  return null;
+}
+
+function asAddressString(value: any): string {
+  return decodeScAddress(value) ?? (typeof value === "string" ? value : "");
+}
+
+/**
+ * Parses a raw Soroban RPC event into a DEX swap, if it looks like one.
+ * Matches the `swap` topic emitted by Phoenix / Soroswap-style liquidity
+ * pool contracts. The exact event shape varies slightly by DEX, so this
+ * accepts a handful of common field name variants rather than committing to
+ * one contract's ABI:
+ *
+ *   topic: ["swap", ...]
+ *   value: {
+ *     token_in | tokenIn | asset_in,
+ *     token_out | tokenOut | asset_out,
+ *     amount_in | amountIn,
+ *     amount_out | amountOut,
+ *     price_impact | priceImpact (optional, already a percentage),
+ *   }
+ *
+ * Returns null for any event that isn't a swap or is missing the amounts
+ * needed to describe one.
+ */
+export function parseSwapEvent(event: any): ParsedSorobanSwap | null {
+  if (!event || !event.topic || event.topic.length === 0) {
+    return null;
+  }
+
+  const action = extractSwapTopicValue(event.topic[0]);
+  if (action !== "swap") {
+    return null;
+  }
+
+  const value = event.value || event.data || {};
+
+  const tokenIn = asAddressString(value.token_in ?? value.tokenIn ?? value.asset_in);
+  const tokenOut = asAddressString(value.token_out ?? value.tokenOut ?? value.asset_out);
+
+  const rawAmountIn = decodeScAmount(value.amount_in ?? value.amountIn);
+  const rawAmountOut = decodeScAmount(value.amount_out ?? value.amountOut);
+
+  if (rawAmountIn === null || rawAmountOut === null) {
+    return null;
+  }
+
+  const rawPriceImpact = value.price_impact ?? value.priceImpact;
+  const priceImpactPct =
+    rawPriceImpact !== undefined && rawPriceImpact !== null && !Number.isNaN(Number(rawPriceImpact))
+      ? String(rawPriceImpact)
+      : null;
+
+  return {
+    contractId: event.contractId || "",
+    tokenIn,
+    tokenOut,
+    amountIn: formatTokenAmount(rawAmountIn),
+    amountOut: formatTokenAmount(rawAmountOut),
+    priceImpactPct,
+    ledgerSeq: event.ledgerSeq || event.ledger,
+    txHash: event.txHash || event.transactionHash,
+  };
+}
+
 /**
  * Parses raw Soroban RPC event data into a clean transfer object.
  */
@@ -271,3 +408,57 @@ export function parseSorobanTransferEvent(
     ledgerSeq: event.ledgerSeq || event.ledger,
   };
 }
+
+/**
+ * Helper to build the LedgerKey for a contract instance.
+ */
+export function getContractInstanceLedgerKey(contractId: string): StellarSdk.xdr.LedgerKey {
+  const address = StellarSdk.Address.fromString(contractId);
+  const scAddress = address.toScAddress();
+
+  const contractDataKey = new StellarSdk.xdr.LedgerKeyContractData({
+    contract: scAddress,
+    key: StellarSdk.xdr.ScVal.scvLedgerKeyContractInstance(),
+    durability: StellarSdk.xdr.ContractDataDurability.persistent(),
+  });
+
+  return StellarSdk.xdr.LedgerKey.contractData(contractDataKey);
+}
+
+/**
+ * Extracts the WASM code hash from a contract instance LedgerEntryData.
+ * Returns null if not a WASM contract or if parsing fails.
+ */
+export function getWasmHashFromContractInstance(val: StellarSdk.xdr.LedgerEntryData): Buffer | null {
+  try {
+    if (val.switch() === StellarSdk.xdr.LedgerEntryType.contractData()) {
+      const contractData = val.contractData();
+      const value = contractData.val();
+      if (value.switch() === StellarSdk.xdr.ScValType.scvContractInstance()) {
+        const instance = value.instance();
+        const executable = instance.executable();
+        if (executable.switch() === StellarSdk.xdr.ContractExecutableType.contractExecutableWasm()) {
+          return executable.wasmHash();
+        }
+      }
+    }
+  } catch (error: any) {
+    console.error("[Soroban] Failed to parse contract instance WASM hash:", error.message || error);
+  }
+  return null;
+}
+
+/**
+ * Deterministic calculation of remaining TTL in ledgers.
+ */
+export function getRemainingTtl(liveUntilLedgerSeq: number, currentLedger: number): number {
+  return liveUntilLedgerSeq - currentLedger;
+}
+
+/**
+ * Deterministic helper to check if renewal is needed.
+ */
+export function shouldRenew(remainingTtl: number, threshold: number): boolean {
+  return remainingTtl <= threshold;
+}
+

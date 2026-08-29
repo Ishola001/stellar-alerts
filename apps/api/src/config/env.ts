@@ -10,6 +10,12 @@ const envSchema = z.object({
   // Overridable so load-test runs (k6, etc.) can measure real server capacity
   // instead of hitting the rate limiter almost immediately.
   RATE_LIMIT_MAX: z.coerce.number().int().positive().optional().default(100),
+  SOROBAN_RENT_WORKER_ENABLED: z.string().optional().default("true"),
+  SOROBAN_RENT_WORKER_INTERVAL_MS: z.string().optional().default("60000"),
+  SOROBAN_RENT_WORKER_SECRET: z.string().optional(),
+  SOROBAN_RENT_RENEWAL_THRESHOLD: z.string().optional().default("5000"),
+  SOROBAN_RENT_TARGET_TTL: z.string().optional().default("10000"),
+  SOROBAN_RENT_MAX_CONCURRENCY: z.string().optional().default("5"),
 });
 
 const parseEnv = () => {
@@ -19,6 +25,12 @@ const parseEnv = () => {
     TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || (process.env.NODE_ENV === 'test' || process.env.VITEST ? "dummy-telegram-bot-token" : undefined),
     JWT_SECRET: process.env.JWT_SECRET || (process.env.NODE_ENV === 'test' || process.env.VITEST ? "dummy-jwt-secret-key-12345" : undefined),
     REDIS_URL: process.env.REDIS_URL || (process.env.NODE_ENV === 'test' || process.env.VITEST ? "redis://localhost:6379" : undefined),
+    SOROBAN_RENT_WORKER_ENABLED: process.env.SOROBAN_RENT_WORKER_ENABLED || "true",
+    SOROBAN_RENT_WORKER_INTERVAL_MS: process.env.SOROBAN_RENT_WORKER_INTERVAL_MS || "60000",
+    SOROBAN_RENT_WORKER_SECRET: process.env.SOROBAN_RENT_WORKER_SECRET,
+    SOROBAN_RENT_RENEWAL_THRESHOLD: process.env.SOROBAN_RENT_RENEWAL_THRESHOLD || "5000",
+    SOROBAN_RENT_TARGET_TTL: process.env.SOROBAN_RENT_TARGET_TTL || "10000",
+    SOROBAN_RENT_MAX_CONCURRENCY: process.env.SOROBAN_RENT_MAX_CONCURRENCY || "5",
   };
 
   const parsed = envSchema.safeParse(envInput);
@@ -37,6 +49,12 @@ const parseEnv = () => {
     REDIS_URL: "redis://localhost:6379",
     PORT: "3001",
     RATE_LIMIT_MAX: 100,
+    SOROBAN_RENT_WORKER_ENABLED: "true",
+    SOROBAN_RENT_WORKER_INTERVAL_MS: "60000",
+    SOROBAN_RENT_WORKER_SECRET: undefined,
+    SOROBAN_RENT_RENEWAL_THRESHOLD: "5000",
+    SOROBAN_RENT_TARGET_TTL: "10000",
+    SOROBAN_RENT_MAX_CONCURRENCY: "5",
   };
 };
 

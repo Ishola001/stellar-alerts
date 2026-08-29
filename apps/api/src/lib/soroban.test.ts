@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { parseSorobanTransferEvent } from "./soroban";
+import {
+  parseSorobanTransferEvent,
+  hashSorobanLedgerEntry,
+  verifySorobanContractStateProof,
+  parseSwapEvent,
+} from "./soroban";
+import { buildMerkleTree, generateMerkleProof, hashMerkleLeaf } from "../utils/merkle-verifier";
 
 describe("Soroban Event Parsing", () => {
   beforeEach(() => {
@@ -110,5 +116,181 @@ describe("Soroban Event Parsing", () => {
     expect(parsed).not.toBeNull();
     expect(parsed?.amount).toBe("999999");
     expect(typeof parsed?.amount).toBe("string");
+  });
+});
+
+describe("Soroban contract state proof verification", () => {
+  // Simulated Soroban LedgerKey / LedgerEntryData XDR — real XDR is opaque
+  // binary, but the verifier only needs *some* stable bytes to hash, so a
+  // base64-encoded fixture stands in for the real xdr.LedgerKey /
+  // xdr.LedgerEntryData bytes without needing a live RPC round trip.
+  function fakeEntryXdr(label: string) {
+    return {
+      ledgerKeyXdr: Buffer.from(`key:${label}`).toString("base64"),
+      ledgerEntryXdr: Buffer.from(`value:${label}`).toString("base64"),
+    };
+  }
+
+  it("hashSorobanLedgerEntry is deterministic and binds both key and value", () => {
+    const entry = fakeEntryXdr("counter");
+    const a = hashSorobanLedgerEntry(entry.ledgerKeyXdr, entry.ledgerEntryXdr);
+    const b = hashSorobanLedgerEntry(entry.ledgerKeyXdr, entry.ledgerEntryXdr);
+    expect(a).toBe(b);
+
+    // Same key, different value -> different leaf hash (the proof commits
+    // to the exact stored value, not just key presence).
+    const changedValue = hashSorobanLedgerEntry(
+      entry.ledgerKeyXdr,
+      Buffer.from("value:counter-changed").toString("base64"),
+    );
+    expect(changedValue).not.toBe(a);
+  });
+
+  it("verifies a genuine contract storage entry against its ledger's state root", () => {
+    const entries = ["balance:alice", "balance:bob", "balance:carol", "admin"].map((label) =>
+      fakeEntryXdr(label),
+    );
+    // Build the tree the same way hashSorobanLedgerEntry does (key||value bytes).
+    const rawLeaves = entries.map((e) =>
+      Buffer.concat([Buffer.from(e.ledgerKeyXdr, "base64"), Buffer.from(e.ledgerEntryXdr, "base64")]),
+    );
+    const tree = buildMerkleTree(rawLeaves);
+
+    const targetIndex = 1; // balance:bob
+    const proof = generateMerkleProof(tree, targetIndex);
+
+    const result = verifySorobanContractStateProof({
+      ledgerKeyXdr: entries[targetIndex].ledgerKeyXdr,
+      ledgerEntryXdr: entries[targetIndex].ledgerEntryXdr,
+      proof,
+      ledgerStateRoot: tree.root,
+    });
+
+    expect(result).toBe(true);
+  });
+
+  it("rejects the proof if the claimed entry value doesn't match what was actually committed", () => {
+    const entries = ["balance:alice", "balance:bob"].map((label) => fakeEntryXdr(label));
+    const rawLeaves = entries.map((e) =>
+      Buffer.concat([Buffer.from(e.ledgerKeyXdr, "base64"), Buffer.from(e.ledgerEntryXdr, "base64")]),
+    );
+    const tree = buildMerkleTree(rawLeaves);
+    const proof = generateMerkleProof(tree, 0);
+
+    // Same key, but an attacker-claimed (higher) balance value.
+    const forgedEntry = fakeEntryXdr("balance:alice-but-richer");
+    const result = verifySorobanContractStateProof({
+      ledgerKeyXdr: entries[0].ledgerKeyXdr,
+      ledgerEntryXdr: forgedEntry.ledgerEntryXdr,
+      proof,
+      ledgerStateRoot: tree.root,
+    });
+
+    expect(result).toBe(false);
+  });
+
+  it("rejects a proof presented against the wrong ledger's state root", () => {
+    const entries = ["balance:alice", "balance:bob"].map((label) => fakeEntryXdr(label));
+    const rawLeaves = entries.map((e) =>
+      Buffer.concat([Buffer.from(e.ledgerKeyXdr, "base64"), Buffer.from(e.ledgerEntryXdr, "base64")]),
+    );
+    const tree = buildMerkleTree(rawLeaves);
+    const proof = generateMerkleProof(tree, 0);
+
+    const staleRoot = hashMerkleLeaf(Buffer.from("some-other-ledgers-root"));
+
+    const result = verifySorobanContractStateProof({
+      ledgerKeyXdr: entries[0].ledgerKeyXdr,
+      ledgerEntryXdr: entries[0].ledgerEntryXdr,
+      proof,
+      ledgerStateRoot: staleRoot,
+    });
+
+    expect(result).toBe(false);
+  });
+
+  it("returns false (never throws) for malformed base64 XDR input", () => {
+    const result = verifySorobanContractStateProof({
+      ledgerKeyXdr: "%%%not-base64%%%",
+      ledgerEntryXdr: "also-not-valid",
+      proof: [],
+      ledgerStateRoot: "not-a-hex-root",
+    });
+    expect(result).toBe(false);
+  });
+});
+
+describe("parseSwapEvent", () => {
+  it("parses a swap event with snake_case fields and a reported price impact", () => {
+    const event = {
+      contractId: "CPOOL",
+      topic: ["swap"],
+      value: {
+        token_in: "CTOKENA",
+        token_out: "CTOKENB",
+        amount_in: "5000000",
+        amount_out: "4900000",
+        price_impact: "2.35",
+      },
+      ledger: 999,
+      txHash: "deadbeef",
+    };
+
+    const swap = parseSwapEvent(event);
+
+    expect(swap).not.toBeNull();
+    expect(swap?.contractId).toBe("CPOOL");
+    expect(swap?.tokenIn).toBe("CTOKENA");
+    expect(swap?.tokenOut).toBe("CTOKENB");
+    expect(swap?.amountIn).toBe("0.5");
+    expect(swap?.amountOut).toBe("0.49");
+    expect(swap?.priceImpactPct).toBe("2.35");
+    expect(swap?.ledgerSeq).toBe(999);
+    expect(swap?.txHash).toBe("deadbeef");
+  });
+
+  it("parses a swap event with camelCase fields and no price impact reported", () => {
+    const event = {
+      contractId: "CPOOL",
+      topic: ["swap"],
+      value: {
+        tokenIn: "CTOKENA",
+        tokenOut: "CTOKENB",
+        amountIn: "1000000",
+        amountOut: "990000",
+      },
+      ledgerSeq: 500,
+    };
+
+    const swap = parseSwapEvent(event);
+
+    expect(swap).not.toBeNull();
+    expect(swap?.priceImpactPct).toBeNull();
+    expect(swap?.ledgerSeq).toBe(500);
+  });
+
+  it("returns null for a non-swap event (e.g. transfer)", () => {
+    const event = {
+      contractId: "CPOOL",
+      topic: ["transfer"],
+      value: { from: "GAAA", to: "GBBB", amount: "100" },
+    };
+
+    expect(parseSwapEvent(event)).toBeNull();
+  });
+
+  it("returns null for an event with no topic", () => {
+    expect(parseSwapEvent({ contractId: "CPOOL", topic: [], value: {} })).toBeNull();
+    expect(parseSwapEvent(null)).toBeNull();
+  });
+
+  it("returns null when the swap event is missing an amount", () => {
+    const event = {
+      contractId: "CPOOL",
+      topic: ["swap"],
+      value: { token_in: "CTOKENA", token_out: "CTOKENB", amount_in: "1000000" },
+    };
+
+    expect(parseSwapEvent(event)).toBeNull();
   });
 });
