@@ -47,11 +47,14 @@ const HEADER = [
 /** Builds the OpenAPI 3 document without booting the full app (see module docstring). */
 export async function buildOpenApiDocument(): Promise<Record<string, unknown>> {
   const app = Fastify({ logger: false });
-  await app.register(swagger, openApiOptions);
-  await app.ready();
-  const document = app.swagger();
-  await app.close();
-  return document as unknown as Record<string, unknown>;
+  try {
+    await app.register(swagger, openApiOptions);
+    await app.ready();
+    const document = app.swagger();
+    return document as unknown as Record<string, unknown>;
+  } finally {
+    await app.close();
+  }
 }
 
 /** Converts an OpenAPI document into the TypeScript source we ship in `@stellar-alerts/shared`. */
