@@ -104,3 +104,18 @@ export type MultisigSignerWatcher = Prisma.MultisigSignerWatcherModel
  * 
  */
 export type PendingMultisigTransaction = Prisma.PendingMultisigTransactionModel
+/**
+ * Model AnchorTransactionWatch
+ * 
+ */
+export type AnchorTransactionWatch = Prisma.AnchorTransactionWatchModel
+/**
+ * Model DexSwapWatch
+ * 
+ */
+export type DexSwapWatch = Prisma.DexSwapWatchModel
+/**
+ * Model DexSwapEvent
+ * 
+ */
+export type DexSwapEvent = Prisma.DexSwapEventModel
