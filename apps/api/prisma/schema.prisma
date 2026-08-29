@@ -71,15 +71,16 @@ model NotificationPreference {
 }
 
 model Webhook {
-  id        String                   @id @default(cuid())
-  userId    String
-  user      User                     @relation(fields: [userId], references: [id])
-  url       String
-  secret    String
-  isActive  Boolean                  @default(true)
-  createdAt DateTime                 @default(now())
-  logs      WebhookLog[]
-  circuitBreaker WebhookCircuitBreaker?
+  id              String                   @id @default(cuid())
+  userId          String
+  user            User                     @relation(fields: [userId], references: [id])
+  url             String
+  secret          String
+  payloadTemplate String?
+  isActive        Boolean                  @default(true)
+  createdAt       DateTime                 @default(now())
+  logs            WebhookLog[]
+  circuitBreaker  WebhookCircuitBreaker?
 }
 
 model WebhookLog {
