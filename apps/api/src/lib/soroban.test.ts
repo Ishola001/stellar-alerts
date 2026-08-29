@@ -3,6 +3,7 @@ import {
   parseSorobanTransferEvent,
   hashSorobanLedgerEntry,
   verifySorobanContractStateProof,
+  parseSwapEvent,
 } from "./soroban";
 import { buildMerkleTree, generateMerkleProof, hashMerkleLeaf } from "../utils/merkle-verifier";
 
@@ -216,5 +217,80 @@ describe("Soroban contract state proof verification", () => {
       ledgerStateRoot: "not-a-hex-root",
     });
     expect(result).toBe(false);
+  });
+});
+
+describe("parseSwapEvent", () => {
+  it("parses a swap event with snake_case fields and a reported price impact", () => {
+    const event = {
+      contractId: "CPOOL",
+      topic: ["swap"],
+      value: {
+        token_in: "CTOKENA",
+        token_out: "CTOKENB",
+        amount_in: "5000000",
+        amount_out: "4900000",
+        price_impact: "2.35",
+      },
+      ledger: 999,
+      txHash: "deadbeef",
+    };
+
+    const swap = parseSwapEvent(event);
+
+    expect(swap).not.toBeNull();
+    expect(swap?.contractId).toBe("CPOOL");
+    expect(swap?.tokenIn).toBe("CTOKENA");
+    expect(swap?.tokenOut).toBe("CTOKENB");
+    expect(swap?.amountIn).toBe("0.5");
+    expect(swap?.amountOut).toBe("0.49");
+    expect(swap?.priceImpactPct).toBe("2.35");
+    expect(swap?.ledgerSeq).toBe(999);
+    expect(swap?.txHash).toBe("deadbeef");
+  });
+
+  it("parses a swap event with camelCase fields and no price impact reported", () => {
+    const event = {
+      contractId: "CPOOL",
+      topic: ["swap"],
+      value: {
+        tokenIn: "CTOKENA",
+        tokenOut: "CTOKENB",
+        amountIn: "1000000",
+        amountOut: "990000",
+      },
+      ledgerSeq: 500,
+    };
+
+    const swap = parseSwapEvent(event);
+
+    expect(swap).not.toBeNull();
+    expect(swap?.priceImpactPct).toBeNull();
+    expect(swap?.ledgerSeq).toBe(500);
+  });
+
+  it("returns null for a non-swap event (e.g. transfer)", () => {
+    const event = {
+      contractId: "CPOOL",
+      topic: ["transfer"],
+      value: { from: "GAAA", to: "GBBB", amount: "100" },
+    };
+
+    expect(parseSwapEvent(event)).toBeNull();
+  });
+
+  it("returns null for an event with no topic", () => {
+    expect(parseSwapEvent({ contractId: "CPOOL", topic: [], value: {} })).toBeNull();
+    expect(parseSwapEvent(null)).toBeNull();
+  });
+
+  it("returns null when the swap event is missing an amount", () => {
+    const event = {
+      contractId: "CPOOL",
+      topic: ["swap"],
+      value: { token_in: "CTOKENA", token_out: "CTOKENB", amount_in: "1000000" },
+    };
+
+    expect(parseSwapEvent(event)).toBeNull();
   });
 });
