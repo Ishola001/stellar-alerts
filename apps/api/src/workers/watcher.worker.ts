@@ -12,6 +12,7 @@ import {
 import { registerSupervisorHeartbeat } from './supervisor';
 import { withWalletLock } from '../lib/lock';
 import { shouldAlert, PaymentContext } from '../lib/rules-engine';
+import { MemoryMonitor, MemorySnapshot } from '../utils/memory-monitor';
 
 
 

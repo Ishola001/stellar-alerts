@@ -17,6 +17,7 @@
     "db:migrate": "npm run db:migrate --workspace=api",
     "db:studio": "npm run db:studio --workspace=api",
     "test:api": "npm run test --workspace=api",
+    "test:e2e": "npm run test:e2e --workspace=api",
     "test:coverage": "npm run test:coverage --workspace=api",
     "test": "npm run test --workspaces --if-present"
   },
