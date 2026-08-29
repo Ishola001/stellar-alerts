@@ -5,6 +5,7 @@ import { signOut, useSession } from 'next-auth/react';
 import { WalletDTO, PaymentDTO } from '@stellar-alerts/shared';
 import { WatcherForm } from '@/components/WatcherForm';
 import {
+  DashboardGrid,
   SummaryStats,
   WalletList,
   PaymentTable,
@@ -279,36 +280,55 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Modular Component 1: SummaryStats */}
-          <SummaryStats
-            totalPaymentsCount={totalPaymentsCount || payments.length}
-            totalVolumeXLM={totalVolumeXLM}
-            activeWalletsCount={wallets.length}
+          {/* Customizable Dashboard Grid — reorder widgets by dragging their headers */}
+          <DashboardGrid
+            items={[
+              {
+                id: 'summary',
+                label: 'Summary Overview',
+                content: (
+                  <SummaryStats
+                    totalPaymentsCount={totalPaymentsCount || payments.length}
+                    totalVolumeXLM={totalVolumeXLM}
+                    activeWalletsCount={wallets.length}
+                  />
+                ),
+              },
+              {
+                id: 'wallets',
+                label: 'Monitored Wallets',
+                content: (
+                  <WalletList
+                    wallets={wallets}
+                    selectedWalletId={selectedWalletId}
+                    onSelectWallet={(id) => setSelectedWalletId(id)}
+                    onRemoveWallet={handleRemoveWallet}
+                    onOpenAddModal={() => {
+                      const el = document.getElementById('add-wallet-section');
+                      if (el) el.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                  />
+                ),
+              },
+              {
+                id: 'watcher-and-payments',
+                label: 'Watcher & Payment Ledger',
+                content: (
+                  <div id="add-wallet-section" className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                    {/* Watcher Form Card */}
+                    <div className="lg:col-span-4 bg-[#0c0c14]/80 backdrop-blur-md rounded-3xl border border-white/10 p-7 shadow-2xl hover:border-cyan-500/30 transition-all duration-500">
+                      <WatcherForm onWalletAdded={() => { fetchWallets(); fetchPayments(); fetchSummary(); }} />
+                    </div>
+
+                    {/* Modular Component 3: PaymentTable */}
+                    <div className="lg:col-span-8">
+                      <PaymentTable payments={payments} isLoading={isLoadingPayments} />
+                    </div>
+                  </div>
+                ),
+              },
+            ]}
           />
-
-          {/* Modular Component 2: WalletList */}
-          <WalletList
-            wallets={wallets}
-            selectedWalletId={selectedWalletId}
-            onSelectWallet={(id) => setSelectedWalletId(id)}
-            onRemoveWallet={handleRemoveWallet}
-            onOpenAddModal={() => {
-              const el = document.getElementById('add-wallet-section');
-              if (el) el.scrollIntoView({ behavior: 'smooth' });
-            }}
-          />
-
-          <div id="add-wallet-section" className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            {/* Watcher Form Card */}
-            <div className="lg:col-span-4 bg-[#0c0c14]/80 backdrop-blur-md rounded-3xl border border-white/10 p-7 shadow-2xl hover:border-cyan-500/30 transition-all duration-500">
-              <WatcherForm onWalletAdded={() => { fetchWallets(); fetchPayments(); fetchSummary(); }} />
-            </div>
-
-            {/* Modular Component 3: PaymentTable */}
-            <div className="lg:col-span-8">
-              <PaymentTable payments={payments} isLoading={isLoadingPayments} />
-            </div>
-          </div>
         </main>
 
         {/* Modular Component 4: NotificationModal */}
