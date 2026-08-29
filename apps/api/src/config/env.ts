@@ -6,6 +6,10 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(1),
   REDIS_URL: z.string().url(),
   PORT: z.string().optional().default("3001"),
+  // Requests/minute allowed per client before @fastify/rate-limit responds 429.
+  // Overridable so load-test runs (k6, etc.) can measure real server capacity
+  // instead of hitting the rate limiter almost immediately.
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().optional().default(100),
 });
 
 const parseEnv = () => {
@@ -32,6 +36,7 @@ const parseEnv = () => {
     JWT_SECRET: "dummy-jwt-secret-key-12345",
     REDIS_URL: "redis://localhost:6379",
     PORT: "3001",
+    RATE_LIMIT_MAX: 100,
   };
 };
 

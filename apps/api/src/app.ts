@@ -4,6 +4,7 @@ import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { z } from 'zod';
+import { env } from './config/env';
 import prismaPlugin from './plugins/prisma';
 import { authRoutes } from './modules/auth/auth.routes';
 import { walletsRoutes } from './modules/wallets/wallets.routes';
@@ -33,7 +34,7 @@ export const buildApp = async () => {
 
   await app.register(rateLimit, {
     global: true,
-    max: 100,
+    max: env.RATE_LIMIT_MAX,
     timeWindow: '1 minute',
   });
 

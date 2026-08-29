@@ -10,6 +10,9 @@ dev.db
 *.db
 scripts/
 !scripts/dr-failover.ts
+# Note: a `!scripts/<file>` negation cannot un-ignore a file inside an
+# already-excluded parent directory (git limitation) — tracked one-off ops
+# scripts under scripts/ (this one included) are added with `git add -f`.
 
 apps/**/.env.local
 
