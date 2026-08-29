@@ -320,3 +320,57 @@ export function parseSorobanTransferEvent(
     ledgerSeq: event.ledgerSeq || event.ledger,
   };
 }
+
+/**
+ * Helper to build the LedgerKey for a contract instance.
+ */
+export function getContractInstanceLedgerKey(contractId: string): StellarSdk.xdr.LedgerKey {
+  const address = StellarSdk.Address.fromString(contractId);
+  const scAddress = address.toScAddress();
+
+  const contractDataKey = new StellarSdk.xdr.LedgerKeyContractData({
+    contract: scAddress,
+    key: StellarSdk.xdr.ScVal.scvLedgerKeyContractInstance(),
+    durability: StellarSdk.xdr.ContractDataDurability.persistent(),
+  });
+
+  return StellarSdk.xdr.LedgerKey.contractData(contractDataKey);
+}
+
+/**
+ * Extracts the WASM code hash from a contract instance LedgerEntryData.
+ * Returns null if not a WASM contract or if parsing fails.
+ */
+export function getWasmHashFromContractInstance(val: StellarSdk.xdr.LedgerEntryData): Buffer | null {
+  try {
+    if (val.switch() === StellarSdk.xdr.LedgerEntryType.contractData()) {
+      const contractData = val.contractData();
+      const value = contractData.val();
+      if (value.switch() === StellarSdk.xdr.ScValType.scvContractInstance()) {
+        const instance = value.instance();
+        const executable = instance.executable();
+        if (executable.switch() === StellarSdk.xdr.ContractExecutableType.contractExecutableWasm()) {
+          return executable.wasmHash();
+        }
+      }
+    }
+  } catch (error: any) {
+    console.error("[Soroban] Failed to parse contract instance WASM hash:", error.message || error);
+  }
+  return null;
+}
+
+/**
+ * Deterministic calculation of remaining TTL in ledgers.
+ */
+export function getRemainingTtl(liveUntilLedgerSeq: number, currentLedger: number): number {
+  return liveUntilLedgerSeq - currentLedger;
+}
+
+/**
+ * Deterministic helper to check if renewal is needed.
+ */
+export function shouldRenew(remainingTtl: number, threshold: number): boolean {
+  return remainingTtl <= threshold;
+}
+
