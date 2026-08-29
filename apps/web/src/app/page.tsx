@@ -12,6 +12,7 @@ import {
   WalletList,
   PaymentTable,
   NotificationModal,
+  ActivityHeatmap,
 } from '@/components/dashboard';
 import { CommandPalette } from '@/components/CommandPalette';
 
@@ -305,6 +306,11 @@ export default function Home() {
                     totalVolumeXLM={totalVolumeXLM}
                   />
                 ),
+              },
+              {
+                id: 'activity-heatmap',
+                label: 'Activity Heatmap',
+                content: <ActivityHeatmap payments={payments} />,
               },
               {
                 id: 'webhook-sandbox',

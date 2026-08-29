@@ -5,3 +5,4 @@ export * from './WebhookSandbox';
 export * from './WalletList';
 export * from './PaymentTable';
 export * from './NotificationModal';
+export * from './ActivityHeatmap';
