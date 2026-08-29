@@ -3,6 +3,7 @@ import { Resend } from "resend";
 import CircuitBreaker from "opossum";
 import { prisma } from "./prisma";
 import { generateWebhookSignature } from "../utils/webhook-signer";
+import { adaptiveWebhookRateLimiter, waitForAdaptiveBackoff } from "../utils/rate-limiter";
 
 export interface AlertJobData {
   paymentId: string;
@@ -45,6 +46,16 @@ async function getOrCreateCircuitBreaker(
         signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
       });
 
+      if (response.status === 429) {
+        const error = new Error(`Rate limited: ${response.status}`) as Error & {
+          statusCode?: number;
+          headers?: Headers;
+        };
+        error.statusCode = 429;
+        error.headers = response.headers;
+        throw error;
+      }
+
       if (response.status >= 500) {
         throw new Error(`Server error: ${response.status}`);
       }
@@ -86,7 +97,9 @@ async function updateCircuitBreakerState(
   });
 }
 
-export async function dispatchWebhookAndLog(webhookId: string, payload: any) {
+export async function dispatchWebhookAndLog(webhookId: string, payload: any, retryAfterBackoff = false) {
+  let targetUrl: string | undefined;
+
   try {
     const webhook = await prisma.webhook.findUnique({
       where: { id: webhookId },
@@ -97,6 +110,8 @@ export async function dispatchWebhookAndLog(webhookId: string, payload: any) {
       console.warn(`[WebhookDispatch] Webhook ${webhookId} not found`);
       return;
     }
+
+    targetUrl = webhook.url;
 
     // Check circuit breaker state
     if (webhook.circuitBreaker?.state === "open") {
@@ -123,6 +138,12 @@ export async function dispatchWebhookAndLog(webhookId: string, payload: any) {
       }
     }
 
+    const adaptiveDelayMs = adaptiveWebhookRateLimiter.getDelayMs(webhook.url);
+    if (adaptiveDelayMs > 0) {
+      console.warn(`[WebhookDispatch] Pausing webhook domain for ${adaptiveDelayMs}ms before retry`);
+      await waitForAdaptiveBackoff(adaptiveDelayMs);
+    }
+
     const payloadString = JSON.stringify(payload);
     const signature = generateWebhookSignature(payloadString, webhook.secret);
 
@@ -141,6 +162,7 @@ export async function dispatchWebhookAndLog(webhookId: string, payload: any) {
         responseBody: responseBody.substring(0, 5000),
       },
     });
+    adaptiveWebhookRateLimiter.clear(webhook.url);
 
     // Reset circuit breaker to closed on success
     if (webhook.circuitBreaker?.state === "half-open") {
@@ -165,6 +187,26 @@ export async function dispatchWebhookAndLog(webhookId: string, payload: any) {
           error: "Circuit breaker is open",
         },
       });
+      return;
+    }
+
+    if ((error.statusCode === 429 || error.message?.includes("Rate limited")) && targetUrl) {
+      const delayMs = adaptiveWebhookRateLimiter.recordRateLimit(targetUrl, error.headers);
+      await prisma.webhookLog.create({
+        data: {
+          webhookId,
+          statusCode: 429,
+          error: `Endpoint rate limited webhook delivery; retrying after ${delayMs}ms`,
+        },
+      });
+
+      if (!retryAfterBackoff) {
+        console.warn(`[WebhookDispatch] Rate limited by ${targetUrl}; retrying after ${delayMs}ms`);
+        await waitForAdaptiveBackoff(delayMs);
+        return dispatchWebhookAndLog(webhookId, payload, true);
+      }
+
+      console.warn(`[WebhookDispatch] Endpoint still rate limited after adaptive retry for ${webhookId}`);
       return;
     }
 
@@ -398,4 +440,3 @@ export async function enqueuePaymentAlert(data: AlertJobData) {
 }
 
 export { dispatchPushNotification } from "../utils/push-protocol";
-
