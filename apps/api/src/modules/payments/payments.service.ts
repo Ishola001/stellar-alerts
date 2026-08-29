@@ -7,19 +7,30 @@ import {
 } from '../../lib/exchange-rates';
 
 export class PaymentsService {
-  async getPayments(walletId: string, limit: number = 20) {
-    console.log(`[PaymentsService] Fetching up to ${limit} payments for wallet ${walletId}`);
+  /**
+   * Lists payments for `userId`. When `walletId` is given, results are
+   * additionally scoped to a wallet owned by that user — a caller can no
+   * longer read another user's payments by guessing/reusing a walletId.
+   * When omitted (the dashboard's "All Wallets" view), every wallet the
+   * user owns is included.
+   */
+  async getPayments(userId: string, walletId?: string, limit: number = 20) {
+    console.log(
+      `[PaymentsService] Fetching up to ${limit} payments for user ${userId}${walletId ? ` (wallet ${walletId})` : ' (all wallets)'}`,
+    );
     return prisma.payment.findMany({
-      where: { walletId },
+      where: walletId ? { walletId, wallet: { userId } } : { wallet: { userId } },
       orderBy: { receivedAt: 'desc' },
       take: limit,
     });
   }
 
-  async getPaymentsSummary(walletId: string, fiatCurrency?: string) {
-    console.log(`[PaymentsService] Fetching summary for wallet ${walletId}`);
+  async getPaymentsSummary(userId: string, walletId?: string, fiatCurrency?: string) {
+    console.log(
+      `[PaymentsService] Fetching summary for user ${userId}${walletId ? ` (wallet ${walletId})` : ' (all wallets)'}`,
+    );
     const result = await prisma.payment.aggregate({
-      where: { walletId },
+      where: walletId ? { walletId, wallet: { userId } } : { wallet: { userId } },
       _sum: { amount: true },
       _count: { id: true },
     });

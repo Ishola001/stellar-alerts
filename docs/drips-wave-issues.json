@@ -3397,5 +3397,160 @@
     "testingRequirements": [
       "Validate Terraform module syntax with terraform validate"
     ]
+  },
+  {
+    "id": 118,
+    "title": "[SOROBAN]: Build Soroban SAC Token Staking & Liquidity Provider Reward Distribution Tracker Engine",
+    "category": "Soroban",
+    "milestone": "Milestone 22 – DeFi Analytics & Resilience",
+    "complexity": "High",
+    "estimatedPoints": 200,
+    "labels": [
+      "soroban",
+      "staking",
+      "defi",
+      "drips-wave",
+      "complexity:high",
+      "200-pts"
+    ],
+    "summary": "Track yield reward emissions and LP token staking distributions across Soroban DeFi contracts.",
+    "background": "DeFi protocols emit complex multi-user reward distribution events during epoch payouts.",
+    "problemStatement": "Standard transaction watchers do not aggregate individual yield emissions per account.",
+    "proposedSolution": "Build StakingRewardTracker calculating yield distributions from Soroban contract topic logs.",
+    "filesLikelyAffected": [
+      "apps/api/src/workers/staking-reward.worker.ts",
+      "apps/api/src/lib/soroban.ts"
+    ],
+    "acceptanceCriteria": [
+      "Aggregates cumulative LP yield emissions per account across Soroban liquidity pools",
+      "Dispatches real-time yield distribution notification cards"
+    ],
+    "testingRequirements": [
+      "Unit test LP reward event calculator",
+      "Mock Soroban RPC contract topic stream"
+    ]
+  },
+  {
+    "id": 119,
+    "title": "[SECURITY]: Implement Automated Smart Contract Event Replay Guard & Transaction Nonce Audit Manager",
+    "category": "Security",
+    "milestone": "Milestone 22 – DeFi Analytics & Resilience",
+    "complexity": "High",
+    "estimatedPoints": 200,
+    "labels": [
+      "security",
+      "soroban",
+      "replay-prevention",
+      "drips-wave",
+      "complexity:high",
+      "200-pts"
+    ],
+    "summary": "Audit ledger sequence nonces to prevent event replay exploits across Soroban indexer workers.",
+    "background": "RPC node re-orgs or duplicate event relays can cause duplicate event processing.",
+    "problemStatement": "Replayed contract events trigger duplicate user webhooks and notification actions.",
+    "proposedSolution": "Implement NonceAuditManager tracking transaction hash + topic sequence pairs in Redis.",
+    "filesLikelyAffected": [
+      "apps/api/src/utils/nonce-audit.ts",
+      "apps/api/src/workers/watcher.worker.ts"
+    ],
+    "acceptanceCriteria": [
+      "Rejects duplicate event topics sharing identical transaction hash and sequence nonce",
+      "Logs replay attempt alert to security audit table"
+    ],
+    "testingRequirements": [
+      "Unit test event nonce replay guard"
+    ]
+  },
+  {
+    "id": 120,
+    "title": "[RELIABILITY]: Build Self-Healing Database Connection Pool & Read-Replica Lag Compensator Engine",
+    "category": "Reliability",
+    "milestone": "Milestone 22 – DeFi Analytics & Resilience",
+    "complexity": "High",
+    "estimatedPoints": 200,
+    "labels": [
+      "reliability",
+      "database",
+      "prisma",
+      "drips-wave",
+      "complexity:high",
+      "200-pts"
+    ],
+    "summary": "Dynamically fall back to primary DB when read-replica replication lag exceeds 500ms.",
+    "background": "Replication lag on Postgres read-replicas can serve stale payment state to API consumers.",
+    "problemStatement": "High read lag causes recent payment queries to return missing or stale data.",
+    "proposedSolution": "Monitor `pg_last_wal_receive_lsn()` lag, auto-routing queries to primary DB if lag > 500ms.",
+    "filesLikelyAffected": [
+      "apps/api/src/lib/prisma.ts",
+      "apps/api/src/lib/db-health.ts"
+    ],
+    "acceptanceCriteria": [
+      "Monitors read-replica WAL lag and routes read traffic to primary DB during high lag spikes",
+      "Auto-resumes read-replica routing when replication lag normalizes below 100ms"
+    ],
+    "testingRequirements": [
+      "Unit test replication lag threshold monitor"
+    ]
+  },
+  {
+    "id": 121,
+    "title": "[FEATURE]: Implement Multi-Chain Cross-Ledger Settlement Analytics Dashboard for Soroban & Stellar Mainnet",
+    "category": "Features",
+    "milestone": "Milestone 22 – DeFi Analytics & Resilience",
+    "complexity": "High",
+    "estimatedPoints": 200,
+    "labels": [
+      "backend",
+      "analytics",
+      "cross-chain",
+      "drips-wave",
+      "complexity:high",
+      "200-pts"
+    ],
+    "summary": "Unified settlement volume aggregator combining Soroban smart contract and Stellar Classic transactions.",
+    "background": "Treasury managers need single-pane analytics for both Classic and Soroban asset flows.",
+    "problemStatement": "Separate data models force users to manually compute aggregate volume statistics.",
+    "proposedSolution": "Build CrossLedgerAnalytics engine compiling combined daily transaction volume totals.",
+    "filesLikelyAffected": [
+      "apps/api/src/modules/payments/payments.service.ts",
+      "apps/web/src/components/dashboard/SummaryStats.tsx"
+    ],
+    "acceptanceCriteria": [
+      "Calculates combined daily volume, transaction count, and average payment size across Stellar streams",
+      "Exposes unified GET /payments/analytics/cross-ledger REST endpoint"
+    ],
+    "testingRequirements": [
+      "Unit test cross-ledger aggregate volume calculator"
+    ]
+  },
+  {
+    "id": 122,
+    "title": "[FRONTEND]: Build Custom User Webhook Delivery Retries Inspection & Manual Re-Trigger Modal UI",
+    "category": "Frontend",
+    "milestone": "Milestone 22 – DeFi Analytics & Resilience",
+    "complexity": "Medium",
+    "estimatedPoints": 150,
+    "labels": [
+      "frontend",
+      "webhooks",
+      "react",
+      "drips-wave",
+      "complexity:medium",
+      "150-pts"
+    ],
+    "summary": "Interactive dashboard modal allowing users to inspect failed webhook logs and trigger manual re-deliveries.",
+    "background": "Users need a UI to inspect HTTP failure status codes and re-send failed webhook payloads.",
+    "problemStatement": "No manual retry button for failed webhook logs in user dashboard.",
+    "proposedSolution": "Build WebhookLogRetryModal displaying delivery status, error logs, and a 'Re-send Webhook' button.",
+    "filesLikelyAffected": [
+      "apps/web/src/components/dashboard/WebhookLogRetryModal.tsx"
+    ],
+    "acceptanceCriteria": [
+      "Renders list of failed webhook dispatches with status code and error trace",
+      "Clicking 'Re-send Webhook' triggers POST /webhooks/retry endpoint and updates log status"
+    ],
+    "testingRequirements": [
+      "Component render and click event test"
+    ]
   }
 ]
