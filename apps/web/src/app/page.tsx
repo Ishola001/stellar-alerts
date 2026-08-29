@@ -9,6 +9,7 @@ import {
   WalletList,
   PaymentTable,
   NotificationModal,
+  NetworkVisualizer3D,
 } from '@/components/dashboard';
 
 export default function Home() {
@@ -294,6 +295,9 @@ export default function Home() {
               <PaymentTable payments={payments} isLoading={isLoadingPayments} />
             </div>
           </div>
+
+          {/* Modular Component 5: NetworkVisualizer3D — live payment stream network */}
+          <NetworkVisualizer3D payments={payments} />
         </main>
 
         {/* Modular Component 4: NotificationModal */}
