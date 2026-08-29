@@ -1,7 +1,9 @@
 import { prisma } from '../../lib/prisma';
+import { env } from '../../config/env';
 import { generateMagicToken, generateSessionToken, verifyToken, MagicLinkPayload, UserPayload } from '../../utils/jwt';
 import { revokeToken } from '../../lib/tokenBlocklist';
 import { parseDID, generateDIDChallenge, verifyDIDSignature, DIDChallenge } from '../../utils/did';
+import { validateTelegramInitData, TelegramInitDataError, TelegramUser } from '../../utils/telegram';
 
 export class AuthService {
   async requestMagicLink(email: string): Promise<string> {
@@ -79,6 +81,44 @@ export class AuthService {
         email: user.email,
         did,
       },
+    };
+  }
+
+  /**
+   * Authenticates a Telegram Mini App user from the signed `initData` string
+   * handed to the web app by the Telegram client. The HMAC-SHA256 signature is
+   * verified against TELEGRAM_BOT_TOKEN before a session JWT is issued, bound to
+   * the Telegram user id via a synthetic email (mirrors the DID auth flow).
+   */
+  async verifyTelegramInitData(
+    initData: string,
+  ): Promise<{ token: string; user: { id: string; email: string }; telegram: TelegramUser }> {
+    let data;
+    try {
+      data = validateTelegramInitData(initData, env.TELEGRAM_BOT_TOKEN);
+    } catch (err) {
+      if (err instanceof TelegramInitDataError) throw err;
+      throw new TelegramInitDataError('MALFORMED', (err as Error).message);
+    }
+
+    if (!data.user?.id) {
+      throw new TelegramInitDataError('MALFORMED', 'initData did not contain a Telegram user');
+    }
+
+    const syntheticEmail = `tg_${data.user.id}@telegram.stellar-alerts.org`;
+    const user = await prisma.user.upsert({
+      where: { email: syntheticEmail },
+      update: {},
+      create: { email: syntheticEmail },
+    });
+
+    const sessionToken = generateSessionToken({ id: user.id, email: user.email });
+    console.log(`[AuthService] 📲 Telegram Mini App auth OK for tg user ${data.user.id}. Session JWT issued.`);
+
+    return {
+      token: sessionToken,
+      user: { id: user.id, email: user.email },
+      telegram: data.user,
     };
   }
 
