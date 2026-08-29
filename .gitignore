@@ -11,6 +11,7 @@ dev.db
 scripts/
 !scripts/dr-failover.ts
 !scripts/generate-types.ts
+!scripts/security-audit.ts
 
 apps/**/.env.local
 
