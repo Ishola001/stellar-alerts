@@ -10,6 +10,7 @@ dev.db
 *.db
 scripts/
 !scripts/dr-failover.ts
+!scripts/bundle-binary.ts
 
 apps/**/.env.local
 

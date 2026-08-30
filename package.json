@@ -18,13 +18,17 @@
     "db:studio": "npm run db:studio --workspace=api",
     "test:api": "npm run test --workspace=api",
     "test:coverage": "npm run test:coverage --workspace=api",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "bundle:binary": "tsx scripts/bundle-binary.ts"
   },
   "packageManager": "npm@10.8.2",
   "dependencies": {
     "@prisma/client": "^6.19.3"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
+    "postject": "^1.0.0-alpha.6",
+    "tsx": "^4.23.12",
     "turbo": "^2.1.0",
     "typescript": "^5.9.3"
   }
