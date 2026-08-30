@@ -4,6 +4,10 @@ import {
   hashSorobanLedgerEntry,
   verifySorobanContractStateProof,
   parseSwapEvent,
+  FlashLoanDetector,
+  buildFlashLoanOperationTree,
+  detectFlashLoanInTransaction,
+  flashLoanDetector,
 } from "./soroban";
 import { buildMerkleTree, generateMerkleProof, hashMerkleLeaf } from "../utils/merkle-verifier";
 
@@ -292,5 +296,146 @@ describe("parseSwapEvent", () => {
     };
 
     expect(parseSwapEvent(event)).toBeNull();
+  });
+});
+
+describe("FlashLoanDetector transaction tree parser (#186)", () => {
+  const detector = new FlashLoanDetector();
+
+  it("detects atomic borrow and repay operations within a single transaction", () => {
+    const operations = [
+      {
+        id: "borrow-1",
+        type: "flash_loan",
+        asset: "CASSETXLM",
+        amount: "1000000000",
+        contractId: "CBLEND",
+      },
+      {
+        id: "swap-1",
+        parentId: "borrow-1",
+        type: "swap",
+        contractId: "CBLEND",
+        tokenIn: "CASSETXLM",
+        tokenOut: "CASSETUSDC",
+        amountIn: "1000000000",
+        amountOut: "250000000",
+      },
+      {
+        id: "swap-2",
+        parentId: "swap-1",
+        type: "swap",
+        contractId: "CBLEND",
+        tokenIn: "CASSETUSDC",
+        tokenOut: "CASSETXLM",
+        amountIn: "250000000",
+        amountOut: "1005000000",
+      },
+      {
+        id: "repay-1",
+        parentId: "borrow-1",
+        type: "flash_repay",
+        asset: "CASSETXLM",
+        amount: "1000500000",
+        fee: "5000000",
+        contractId: "CBLEND",
+      },
+    ];
+
+    const tree = buildFlashLoanOperationTree(operations);
+    expect(tree.length).toBeGreaterThan(0);
+    expect(tree[0].children.length).toBeGreaterThan(0);
+
+    const alert = detectFlashLoanInTransaction("tx-flash-1", operations, 1200);
+    expect(alert).not.toBeNull();
+    expect(alert?.borrowedAsset).toBe("CASSETXLM");
+    expect(alert?.borrowedAmount).toBe("100");
+    expect(alert?.feeAmount).toBe("0.5");
+    expect(Number(alert?.netArbitrageProfit)).toBeGreaterThan(0);
+  });
+
+  it("emits borrowed asset, fee amount, and net arbitrage profit in the alert payload", () => {
+    const events = [
+      {
+        contractId: "CBLEND",
+        topic: ["borrow"],
+        txHash: "tx-profit-1",
+        ledger: 1500,
+        value: { asset: "CASSETXLM", amount: "2000000000" },
+      },
+      {
+        contractId: "CBLEND",
+        topic: ["swap"],
+        txHash: "tx-profit-1",
+        ledger: 1500,
+        value: {
+          token_in: "CASSETXLM",
+          token_out: "CASSETUSDC",
+          amount_in: "2000000000",
+          amount_out: "500000000",
+        },
+      },
+      {
+        contractId: "CBLEND",
+        topic: ["repay"],
+        txHash: "tx-profit-1",
+        ledger: 1500,
+        value: {
+          asset: "CASSETXLM",
+          amount: "2010000000",
+          fee: "10000000",
+          profit: "5000000",
+        },
+      },
+    ];
+
+    const alert = flashLoanDetector.detectFromEvents(events, "tx-profit-1", 1500);
+
+    expect(alert).not.toBeNull();
+    expect(alert?.borrowedAsset).toBe("CASSETXLM");
+    expect(alert?.borrowedAmount).toBe("200");
+    expect(alert?.feeAmount).toBe("1");
+    expect(alert?.netArbitrageProfit).toBe("0.5");
+  });
+
+  it("returns null when repay is missing for a borrow within the transaction tree", () => {
+    const alert = detector.detect({
+      txHash: "tx-incomplete",
+      operations: [
+        {
+          id: "borrow-1",
+          type: "borrow",
+          asset: "CASSETXLM",
+          amount: "1000000000",
+          contractId: "CBLEND",
+        },
+      ],
+    });
+
+    expect(alert).toBeNull();
+  });
+
+  it("returns null when repay amount is less than borrow amount", () => {
+    const alert = detector.detect({
+      txHash: "tx-undercollateralized",
+      operations: [
+        {
+          id: "borrow-1",
+          type: "borrow",
+          asset: "CASSETXLM",
+          amount: "1000000000",
+          contractId: "CBLEND",
+        },
+        {
+          id: "repay-1",
+          type: "repay",
+          asset: "CASSETXLM",
+          amount: "900000000",
+          contractId: "CBLEND",
+        },
+      ],
+    });
+
+    expect(alert).toBeNull();
   });
 });
