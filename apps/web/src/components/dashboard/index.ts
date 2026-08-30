@@ -5,6 +5,7 @@ export * from './WebhookSandbox';
 export * from './WalletList';
 export * from './PaymentTable';
 export * from './NotificationModal';
+export * from './SorobanSimulationSandbox';
+export * from './ActivityHeatmap';
 export * from './NetworkVisualizer3D';
 export * from './AuditWorkspace';
-export * from './SorobanSimulationSandbox';

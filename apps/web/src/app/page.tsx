@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import NetworkVisualizer3D from '@/components/dashboard/NetworkVisualizer3D';
+import AuditWorkspace from '@/components/dashboard/AuditWorkspace';
 import { signOut, useSession } from 'next-auth/react';
 import { WalletDTO, PaymentDTO } from '@stellar-alerts/shared';
 import { WatcherForm } from '@/components/WatcherForm';
@@ -12,10 +14,11 @@ import {
   WalletList,
   PaymentTable,
   NotificationModal,
-  NetworkVisualizer3D,
-  AuditWorkspace,
+  ActivityHeatmap,
 } from '@/components/dashboard';
 import { CommandPalette } from '@/components/CommandPalette';
+
+type AppSession = { accessToken?: string };
 
 export default function Home() {
   const { data: session } = useSession();
@@ -41,8 +44,9 @@ export default function Home() {
   // Helper to get auth headers
   const getHeaders = useCallback(() => {
     const headers: Record<string, string> = {};
-    if (session && (session as any).accessToken) {
-      headers['Authorization'] = `Bearer ${(session as any).accessToken}`;
+    const accessToken = (session as (typeof session & AppSession) | null)?.accessToken;
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
     }
     return headers;
   }, [session]);
@@ -103,11 +107,13 @@ export default function Home() {
   }, [session, getHeaders]);
 
   useEffect(() => {
-    if (session) {
-      fetchWallets();
-      fetchPayments();
-      fetchSummary();
-    }
+    if (!session) return;
+    const timer = window.setTimeout(() => {
+      void fetchWallets();
+      void fetchPayments();
+      void fetchSummary();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [session, selectedWalletId, fetchWallets, fetchPayments, fetchSummary]);
 
   const handleRemoveWallet = async (id: string) => {
@@ -309,6 +315,11 @@ export default function Home() {
                 ),
               },
               {
+                id: 'activity-heatmap',
+                label: 'Activity Heatmap',
+                content: <ActivityHeatmap payments={payments} />,
+              },
+              {
                 id: 'webhook-sandbox',
                 label: 'Webhook Sandbox',
                 content: <WebhookSandbox />,
@@ -358,7 +369,7 @@ export default function Home() {
                   <AuditWorkspace
                     payments={payments}
                     currentUser={{
-                      id: (session.user as any)?.id || session.user?.email || 'anonymous',
+                      id: (session.user as { id?: string } | undefined)?.id || session.user?.email || 'anonymous',
                       name: session.user?.name || session.user?.email || 'Auditor',
                     }}
                   />
