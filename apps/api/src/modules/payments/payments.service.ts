@@ -1,28 +1,62 @@
 import { prisma } from '../../lib/prisma';
 import { addDifferentialPrivacyNoise } from '../../utils/differential-privacy';
+import {
+  convertUsdToFiat,
+  isSupportedFiatCurrency,
+  type SupportedFiatCurrency,
+} from '../../lib/exchange-rates';
 
 export class PaymentsService {
-  async getPayments(walletId: string, limit: number = 20) {
-    console.log(`[PaymentsService] Fetching up to ${limit} payments for wallet ${walletId}`);
+  /**
+   * Lists payments for `userId`. When `walletId` is given, results are
+   * additionally scoped to a wallet owned by that user — a caller can no
+   * longer read another user's payments by guessing/reusing a walletId.
+   * When omitted (the dashboard's "All Wallets" view), every wallet the
+   * user owns is included.
+   */
+  async getPayments(userId: string, walletId?: string, limit: number = 20) {
+    console.log(
+      `[PaymentsService] Fetching up to ${limit} payments for user ${userId}${walletId ? ` (wallet ${walletId})` : ' (all wallets)'}`,
+    );
     return prisma.payment.findMany({
-      where: { walletId },
+      where: walletId ? { walletId, wallet: { userId } } : { wallet: { userId } },
       orderBy: { receivedAt: 'desc' },
       take: limit,
     });
   }
 
-  async getPaymentsSummary(walletId: string) {
-    console.log(`[PaymentsService] Fetching summary for wallet ${walletId}`);
+  async getPaymentsSummary(userId: string, walletId?: string, fiatCurrency?: string) {
+    console.log(
+      `[PaymentsService] Fetching summary for user ${userId}${walletId ? ` (wallet ${walletId})` : ' (all wallets)'}`,
+    );
     const result = await prisma.payment.aggregate({
-      where: { walletId },
+      where: walletId ? { walletId, wallet: { userId } } : { wallet: { userId } },
       _sum: { amount: true },
       _count: { id: true },
     });
-    
-    return {
-      totalReceived: result._sum.amount || 0,
-      paymentCount: result._count.id || 0,
+
+    const totalReceivedUsd = Number(result._sum.amount || 0);
+    const paymentCount = result._count.id || 0;
+
+    const summary: Record<string, unknown> = {
+      totalReceived: totalReceivedUsd,
+      paymentCount,
     };
+
+    // Fiat conversion when requested
+    if (fiatCurrency && isSupportedFiatCurrency(fiatCurrency)) {
+      const conversion = await convertUsdToFiat(
+        totalReceivedUsd,
+        fiatCurrency as SupportedFiatCurrency,
+      );
+      summary.fiatConversion = {
+        currency: conversion.currency,
+        convertedTotal: conversion.convertedAmount,
+        exchangeRate: conversion.rate,
+      };
+    }
+
+    return summary;
   }
 
   /**
