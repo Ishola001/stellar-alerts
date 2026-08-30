@@ -31,7 +31,6 @@ export const SummaryStats: React.FC<SummaryStatsProps> = ({
     let isMounted = true;
 
     if (rates) {
-      setRateStatus('live');
       return () => {
         isMounted = false;
       };
@@ -52,6 +51,8 @@ export const SummaryStats: React.FC<SummaryStatsProps> = ({
       isMounted = false;
     };
   }, [rates]);
+
+  const resolvedRateStatus = rates ? 'live' : rateStatus;
 
   const resolvedRates = useMemo(
     () => ({
@@ -110,14 +111,14 @@ export const SummaryStats: React.FC<SummaryStatsProps> = ({
           )}
           <span
             className={`mt-2 inline-flex w-fit rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-              rateStatus === 'live'
+              resolvedRateStatus === 'live'
                 ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
-                : rateStatus === 'loading'
+                : resolvedRateStatus === 'loading'
                   ? 'bg-cyan-500/10 text-cyan-300 border border-cyan-500/20'
                   : 'bg-amber-500/10 text-amber-300 border border-amber-500/20'
             }`}
           >
-            {rateStatus === 'live' ? 'Live rates' : rateStatus === 'loading' ? 'Loading rates' : 'Fallback rates'}
+            {resolvedRateStatus === 'live' ? 'Live rates' : resolvedRateStatus === 'loading' ? 'Loading rates' : 'Fallback rates'}
           </span>
         </div>
       </div>

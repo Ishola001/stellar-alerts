@@ -38,9 +38,7 @@ export const AuditWorkspace: React.FC<AuditWorkspaceProps> = ({
   roomId = 'default',
 }) => {
   // One Y.Doc for the lifetime of the component instance.
-  const auditRef = useRef<AuditDoc | null>(null);
-  if (auditRef.current === null) auditRef.current = createAuditDoc();
-  const audit = auditRef.current;
+  const [audit] = useState<AuditDoc>(createAuditDoc);
 
   const [, bumpVersion] = useReducer((n: number) => n + 1, 0);
   const [peers, setPeers] = useState<PresenceState[]>([]);
