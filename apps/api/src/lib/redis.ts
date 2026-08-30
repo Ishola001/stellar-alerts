@@ -1,4 +1,15 @@
-import { Redis } from 'ioredis';
-import { env } from '../config/env';
+import Redis from 'ioredis';
 
-export const redis = new Redis(env.REDIS_URL);
+const redisHost = process.env.REDIS_HOST || 'localhost';
+const redisPort = parseInt(process.env.REDIS_PORT || '6379', 10);
+
+export const redis = new Redis({
+  host: redisHost,
+  port: redisPort,
+  lazyConnect: true, // Connects on first command, no eager connection failure at startup
+  maxRetriesPerRequest: 1,
+});
+
+redis.on('error', (err) => {
+  console.warn(`[Redis] Connection error: ${err.message}`);
+});
