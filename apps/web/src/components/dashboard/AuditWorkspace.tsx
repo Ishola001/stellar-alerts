@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import type { PaymentDTO } from '@stellar-alerts/shared';
 import {
