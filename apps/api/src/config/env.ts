@@ -16,6 +16,7 @@ const envSchema = z.object({
   SOROBAN_RENT_RENEWAL_THRESHOLD: z.string().optional().default("5000"),
   SOROBAN_RENT_TARGET_TTL: z.string().optional().default("10000"),
   SOROBAN_RENT_MAX_CONCURRENCY: z.string().optional().default("5"),
+  SOROBAN_STAKING_REWARD_WORKER_ENABLED: z.string().optional().default("true"),
 });
 
 const parseEnv = () => {
