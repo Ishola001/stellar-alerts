@@ -25,11 +25,11 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      - name: Install Dependencies
-        run: npm ci
+      - name: Install OSV Scanner
+        uses: google/osv-scanner-action/install@v2.0.3
 
       - name: Run OSV security audit
-        run: npm run security:audit -- --report security-audit-report.json
+        run: osv-scanner scan source -r . --config osv-scanner.toml --format json > security-audit-report.json
 
       - name: Upload vulnerability report
         if: always()
