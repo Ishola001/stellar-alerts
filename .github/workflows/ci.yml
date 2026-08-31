@@ -11,6 +11,15 @@ jobs:
     name: Build, Lint & Test
     runs-on: ubuntu-latest
 
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
