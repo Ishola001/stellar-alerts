@@ -25,24 +25,27 @@ describe('PaymentsController', () => {
   });
 
   describe('getPaymentsSummary', () => {
-    it('should return 400 if walletId is missing', async () => {
-      mockRequest = { query: {} };
+    it('should pass if walletId is missing because it is optional', async () => {
+      mockRequest = { query: {}, user: { id: 'user-1' } };
+      
+      const mockSummary = { volume: 1500, count: 5 };
+      vi.mocked(paymentsService.getPaymentsSummary).mockResolvedValue(mockSummary);
       
       await paymentsController.getPaymentsSummary(mockRequest, mockReply);
       
-      expect(mockReply.status).toHaveBeenCalledWith(400);
-      expect(mockReply.send).toHaveBeenCalledWith(expect.objectContaining({ error: 'Invalid query' }));
+      expect(mockReply.send).toHaveBeenCalledWith({ success: true, summary: mockSummary });
+      
     });
 
     it('should return volume and count for a valid walletId', async () => {
-      mockRequest = { query: { walletId: 'wallet_123' } };
+      mockRequest = { query: { walletId: 'wallet_123' }, user: { id: 'user-1' } };
       const mockSummary = { volume: 1500, count: 5 };
       
       vi.mocked(paymentsService.getPaymentsSummary).mockResolvedValue(mockSummary);
       
       await paymentsController.getPaymentsSummary(mockRequest, mockReply);
       
-      expect(paymentsService.getPaymentsSummary).toHaveBeenCalledWith('wallet_123');
+      expect(paymentsService.getPaymentsSummary).toHaveBeenCalledWith('user-1', 'wallet_123', undefined);
       expect(mockReply.send).toHaveBeenCalledWith({ success: true, summary: mockSummary });
     });
   });
