@@ -77,7 +77,9 @@ jobs:
         # db push (not migrate deploy) targets this job's disposable Postgres
         # service directly from schema.prisma — no persisted migration history
         # to manage for a database that is destroyed at the end of the run.
-        run: npx prisma db push --skip-generate
+        run: |
+          npx prisma db push
+          npx prisma generate
 
       - name: Start API server
         working-directory: apps/api
