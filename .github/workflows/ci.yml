@@ -24,6 +24,9 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
+      - name: Verify generated OpenAPI types are up to date
+        run: npm run generate:types:check
+
       - name: Build Shared Package (@stellar-alerts/shared)
         run: npx tsc -p packages/shared/tsconfig.json
 
@@ -33,8 +36,14 @@ jobs:
       - name: Typecheck Frontend (apps/web)
         run: npx tsc -p apps/web/tsconfig.json --noEmit
 
-      - name: Run Vitest Unit Tests
+      - name: Run API Unit Tests
         run: npm run test:api
+
+      - name: Run Web Lint
+        run: npm run lint --workspace=web
+
+      - name: Run Web Unit Tests
+        run: npm run test --workspace=web
 
       - name: Build Web Application
         run: npm run build --workspace=web
