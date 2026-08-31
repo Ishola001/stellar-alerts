@@ -4,6 +4,8 @@ import { generateMagicToken, generateSessionToken, verifyToken, MagicLinkPayload
 import { revokeToken } from '../../lib/tokenBlocklist';
 import { parseDID, generateDIDChallenge, verifyDIDSignature, DIDChallenge } from '../../utils/did';
 import { validateTelegramInitData, TelegramInitDataError, TelegramUser } from '../../utils/telegram';
+import jwt from 'jsonwebtoken';
+import { redis } from '../../lib/redis';
 
 export class AuthService {
   async requestMagicLink(email: string): Promise<string> {
