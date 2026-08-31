@@ -15,7 +15,9 @@ import {
   PaymentTable,
   NotificationModal,
   ActivityHeatmap,
+  EmailTemplatePreview,
 } from '@/components/dashboard';
+import { EmailTemplateConfig } from '@/components/dashboard/EmailTemplatePreview';
 import { CommandPalette } from '@/components/CommandPalette';
 
 type AppSession = { accessToken?: string };
@@ -153,6 +155,21 @@ export default function Home() {
       }
     } catch (err) {
       console.error('Failed to remove wallet:', err);
+    }
+  };
+
+  const handleSaveEmailTemplate = async (template: EmailTemplateConfig) => {
+    try {
+      await fetch('http://localhost:3001/notifications/preferences', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getHeaders(),
+        },
+        body: JSON.stringify({ emailTemplate: template }),
+      });
+    } catch (err) {
+      console.error('Failed to save email template preferences:', err);
     }
   };
 
@@ -340,6 +357,11 @@ export default function Home() {
                 id: 'activity-heatmap',
                 label: 'Activity Heatmap',
                 content: <ActivityHeatmap payments={payments} />,
+              },
+              {
+                id: 'email-template-preview',
+                label: 'Email Receipt Template',
+                content: <EmailTemplatePreview onSaveTemplate={handleSaveEmailTemplate} />,
               },
               {
                 id: 'webhook-sandbox',

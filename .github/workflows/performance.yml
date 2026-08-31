@@ -49,7 +49,7 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 20
 
     env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stellar_alerts
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stellar_alerts?connection_limit=100
       REDIS_URL: redis://localhost:6379
       JWT_SECRET: ci-perf-test-secret-key
       TELEGRAM_BOT_TOKEN: ci-perf-test-bot-token
@@ -74,36 +74,11 @@ jobs:
 
       - name: Sync database schema (wait + retry)
         working-directory: apps/api
-        # db push targets the job's disposable Postgres service. Wait for
-        # the service to accept connections and retry to avoid transient
-        # race conditions on shared runners.
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stellar_alerts
+        # db push (not migrate deploy) targets this job's disposable Postgres
+        # service directly from schema.prisma — no persisted migration history
+        # to manage for a database that is destroyed at the end of the run.
         run: |
-          # Wait up to 60s for Postgres to accept connections
-          for i in $(seq 1 30); do
-            if nc -z localhost 5432 2>/dev/null; then
-              echo "Postgres port open."
-              break
-            fi
-            echo "Waiting for Postgres... ($i/30)"
-            sleep 2
-          done
-
-          # Retry prisma db push with exponential backoff (5 attempts)
-          attempt=1
-          until [ $attempt -gt 5 ]; do
-            npx prisma db push --skip-generate --accept-data-loss && break
-            echo "prisma db push failed, retrying ($attempt/5)..."
-            sleep $((attempt * 2))
-            attempt=$((attempt + 1))
-          done
-
-          if [ $attempt -gt 5 ]; then
-            echo "::error::prisma db push failed after 5 attempts."
-            exit 1
-          fi
-
+          npx prisma db push
           npx prisma generate
 
       - name: Start API server
