@@ -14,7 +14,35 @@ import { withWalletLock } from '../lib/lock';
 import { shouldAlert, PaymentContext } from '../lib/rules-engine';
 import { MemoryMonitor, MemorySnapshot } from '../utils/memory-monitor';
 
+let memoryMonitor: MemoryMonitor | null = null;
 
+/**
+ * Stops the memory monitor and exits the process so WorkerSupervisor
+ * respawns it cleanly. process.exit is deferred a turn via setImmediate so
+ * the log line above it actually flushes before the process goes down.
+ */
+export function gracefulRestart(reason: string, snapshot: MemorySnapshot): void {
+  console.error(
+    `[WatcherWorker] 🔁 Restarting worker: ${reason} (heap usage ${(snapshot.usageRatio * 100).toFixed(1)}%)`,
+  );
+  memoryMonitor?.stop();
+  setImmediate(() => {
+    process.exit(1);
+  });
+}
+
+export function startMemoryMonitor(): MemoryMonitor {
+  memoryMonitor = new MemoryMonitor({
+    onRestartRequired: (snapshot) => gracefulRestart('memory usage exceeded restart threshold', snapshot),
+    onCleanup: (snapshot, gcRan) => {
+      console.log(
+        `[WatcherWorker] 🧹 Ran memory cleanup pass at ${(snapshot.usageRatio * 100).toFixed(1)}% heap usage (gc ran: ${gcRan})`,
+      );
+    },
+  });
+  memoryMonitor.start();
+  return memoryMonitor;
+}
 
 export async function processPaymentRecord(
   wallet: { id: string; publicKey: string; userId?: string },
@@ -381,5 +409,6 @@ async function processSorobanContractEvents(contractId: string) {
 
 if (require.main === module) {
   registerSupervisorHeartbeat();
+  startMemoryMonitor();
   runWatcher();
 }
