@@ -9,4 +9,4 @@ export * from './SorobanSimulationSandbox';
 export * from './ActivityHeatmap';
 export * from './NetworkVisualizer3D';
 export * from './AuditWorkspace';
-export * from './SorobanEventInspector';
+export * from './EmailTemplatePreview';
