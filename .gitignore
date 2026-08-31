@@ -1,5 +1,4 @@
 node_modules
-.env
 dist
 build
 .next
@@ -21,3 +20,4 @@ apps/**/.env.local
 
 target/
 Cargo.lock
+config.bat

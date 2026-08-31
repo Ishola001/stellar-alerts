@@ -1,0 +1,18 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "main",
+    "origin",
+    "security/issue-234-implement-automated-webhook-payload"
+  ],
+  "parent": {
+    "main": null,
+    "origin": "main",
+    "security/issue-234-implement-automated-webhook-payload": "main"
+  },
+  "order": [
+    "main",
+    "origin",
+    "security/issue-234-implement-automated-webhook-payload"
+  ]
+}

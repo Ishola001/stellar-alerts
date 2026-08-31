@@ -8,12 +8,12 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "turbo dev",
-    "dev:api": "npm run dev --workspace=api",
-    "dev:worker": "npm run dev:worker --workspace=api",
-    "dev:reporting": "npm run dev:reporting --workspace=api",
-    "dev:web": "npm run dev --workspace=web",
-    "dev:collab": "npm run dev:collab --workspace=web",
+    "dev": "node init && turbo dev",
+    "dev:api": "node init && npm run dev --workspace=api",
+    "dev:worker": "node init && npm run dev:worker --workspace=api",
+    "dev:reporting": "node init && npm run dev:reporting --workspace=api",
+    "dev:web": "node init && npm run dev --workspace=web",
+    "dev:collab": "node init && npm run dev:collab --workspace=web",
     "db:push": "npm run db:push --workspace=api",
     "db:migrate": "npm run db:migrate --workspace=api",
     "db:studio": "npm run db:studio --workspace=api",
