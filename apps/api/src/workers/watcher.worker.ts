@@ -192,7 +192,7 @@ export async function processWalletPayments(wallet: { id: string; publicKey: str
 }
 
 export async function startHorizonSSEStream(wallet: { id: string; publicKey: string; userId?: string }) {
-  console.log(`[WatcherWorker] 📡 Opening Horizon SSE payment stream for wallet ${wallet.publicKey.substring(0, 8)}...`);
+  console.log(`[WatcherWorker] 📡 Opening Multi-Node Horizon SSE payment streams for wallet ${wallet.publicKey.substring(0, 8)}...`);
 
   let timeoutId: NodeJS.Timeout;
   let closeStream: (() => void) | undefined;
@@ -200,7 +200,7 @@ export async function startHorizonSSEStream(wallet: { id: string; publicKey: str
   const resetHeartbeat = () => {
     clearTimeout(timeoutId);
     timeoutId = setTimeout(() => {
-      console.warn(`[WatcherStream] ⚠️ Heartbeat timeout for ${wallet.publicKey.substring(0, 8)}... Reconnecting...`);
+      console.warn(`[WatcherStream] ⚠️ Heartbeat timeout for ${wallet.publicKey.substring(0, 8)}... Reconnecting multi-node cluster...`);
       if (closeStream) closeStream();
       startHorizonSSEStream(wallet);
     }, 60000);
@@ -210,27 +210,26 @@ export async function startHorizonSSEStream(wallet: { id: string; publicKey: str
     const cursor = await ensureCursor(wallet);
     resetHeartbeat();
 
-    closeStream = stellar.server
-      .payments()
-      .forAccount(wallet.publicKey)
-      .cursor(cursor)
-      .stream({
-        onmessage: async (record: any) => {
-          console.log(
-            `[WatcherStream] ⚡ Live SSE stream message received: ${record.type}`,
-          );
-          await processPaymentRecord(wallet, record);
-          if (record.paging_token) {
-            await saveCursor(wallet.id, record.paging_token);
-          }
-        },
-        onerror: (error: any) => {
-          console.error(
-            `[WatcherStream] SSE stream error for ${wallet.publicKey.substring(0, 8)}...:`,
-            error,
-          );
-        },
-      }) as unknown as () => void; // cast to avoid typings issues since stellar-sdk types might vary
+    closeStream = stellar.multiNode.streamPaymentsMultiNode(
+      wallet.publicKey,
+      cursor,
+      async (record: any, nodeUrl: string) => {
+        resetHeartbeat();
+        console.log(
+          `[WatcherStream] ⚡ Live SSE stream message received from ${nodeUrl}: ${record.type}`,
+        );
+        await processPaymentRecord(wallet, record);
+        if (record.paging_token) {
+          await saveCursor(wallet.id, record.paging_token);
+        }
+      },
+      (error: any, nodeUrl: string) => {
+        console.warn(
+          `[WatcherStream] SSE stream error on node ${nodeUrl} for ${wallet.publicKey.substring(0, 8)}...:`,
+          error?.message || error,
+        );
+      }
+    );
 
     const originalClose = closeStream;
     closeStream = () => {
@@ -240,7 +239,7 @@ export async function startHorizonSSEStream(wallet: { id: string; publicKey: str
 
     return closeStream;
   } catch (err: any) {
-    console.error(`[WatcherStream] Failed to open SSE stream: ${err.message}`);
+    console.error(`[WatcherStream] Failed to open multi-node SSE stream: ${err.message}`);
     clearTimeout(timeoutId!);
     return null;
   }
