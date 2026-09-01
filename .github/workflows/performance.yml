@@ -90,10 +90,12 @@ jobs:
             sleep 2
           done
 
-          # Retry prisma db push with exponential backoff (5 attempts)
+          # Retry prisma db push with exponential backoff (5 attempts).
+          # Prisma v7 does not support --skip-generate; generate is run as a
+          # separate step after the schema has been successfully pushed.
           attempt=1
           until [ $attempt -gt 5 ]; do
-            npx prisma db push --skip-generate --accept-data-loss && break
+            npx prisma db push --accept-data-loss && break
             echo "prisma db push failed, retrying ($attempt/5)..."
             sleep $((attempt * 2))
             attempt=$((attempt + 1))
