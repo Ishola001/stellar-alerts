@@ -13,6 +13,8 @@ import { registerSupervisorHeartbeat } from './supervisor';
 import { withWalletLock } from '../lib/lock';
 import { shouldAlert, PaymentContext } from '../lib/rules-engine';
 import { MemoryMonitor, MemorySnapshot } from '../utils/memory-monitor';
+import { nonceAuditManager } from '../utils/nonce-audit';
+
 
 
 
@@ -358,7 +360,32 @@ async function processSorobanContractEvents(contractId: string) {
         const parsed = parseSacTransferEvent(event);
         if (!parsed) continue;
 
+        const txHash = event.txHash || event.transactionHash || event.transaction_hash || event.hash || (event as any).id || '';
+        const topic = (parsed as any).topic || (Array.isArray(event.topic) ? event.topic[0] : event.topic) || 'transfer';
+        const sequence = (parsed as any).ledgerSeq || event.ledgerSeq || event.ledger || event.pagingToken || startLedger;
+
+        // Replay Guard: Audit txHash + topic sequence pair against Redis cache
+        const isValidNonce = await nonceAuditManager.validateAndRecordNonce({
+          txHash,
+          topic,
+          sequence,
+          contractId,
+          details: {
+            from: parsed.from,
+            to: parsed.to,
+            amount: parsed.amount,
+          },
+        });
+
+        if (!isValidNonce) {
+          console.warn(
+            `[SorobanRouter] 🛡️ Event replay guard rejected replayed event (topic: ${topic}, txHash: ${txHash}, sequence: ${sequence})`,
+          );
+          continue;
+        }
+
         const routes = routeEventToUsers(event);
+
 
         for (const route of routes) {
           console.log(
