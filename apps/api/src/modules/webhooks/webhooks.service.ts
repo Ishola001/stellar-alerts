@@ -170,7 +170,7 @@ export class WebhooksService {
       },
     });
 
-    const signature = generateWebhookSignature(payload, webhook.secret);
+    const signature = await signWebhookPayload(payload, { secret: webhook.secret });
 
     try {
       const response = await fetch(webhook.url, {
