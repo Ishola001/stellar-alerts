@@ -64,7 +64,11 @@ describe('KMS Webhook HMAC Signer (#189)', () => {
   it('rejects signatures that do not match any active rotated key', async () => {
     const mockClient = createMockKmsHmacClient();
     const signer = buildSigner(mockClient);
-    const unrelatedSigner = buildSigner(mockClient, ['arn:aws:kms:us-east-1:123456789012:key/unrelated']);
+    const unrelatedSigner = createKmsWebhookSigner({
+      provider: 'aws',
+      primaryKeyId: 'arn:aws:kms:us-east-1:123456789012:key/unrelated',
+      client: mockClient,
+    });
     const unrelatedSignature = await unrelatedSigner.signHmacSha256(message);
 
     await expect(signer.verifyHmacSha256(message, unrelatedSignature)).resolves.toBe(false);

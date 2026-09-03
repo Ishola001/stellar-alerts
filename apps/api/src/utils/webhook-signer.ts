@@ -39,7 +39,247 @@ export interface KmsWebhookSigningEnv {
   previousKeyIds?: string[];
 }
 
+export interface ParsedWebhookHeader {
+  timestamp: number;
+  nonce: string;
+  signature: string;
+}
+
+export type WebhookVerificationHttpStatus = 200 | 400 | 401;
+
+export interface WebhookVerificationResult {
+  status: WebhookVerificationHttpStatus;
+  valid: boolean;
+  error?: string;
+}
+
 export const DEFAULT_DRIFT_TOLERANCE_MS = 300000; // 5 minutes
+export const MAX_WEBHOOK_HEADER_LENGTH = 8192;
+export const MAX_WEBHOOK_PAYLOAD_LENGTH = 1024 * 1024;
+const SIGNATURE_HEX_REGEX = /^[0-9a-fA-F]{64}$/;
+const CONTROL_CHAR_REGEX = /[\u0000-\u001F\u007F]/;
+const MAX_NONCE_LENGTH = 128;
+
+function normalizePayload(payload: unknown): string {
+  if (payload === null || payload === undefined) {
+    return '';
+  }
+  if (typeof payload !== 'string') {
+    return String(payload);
+  }
+  return payload;
+}
+
+function safeTimingSafeEqual(left: string, right: string): boolean {
+  try {
+    const leftBuffer = Buffer.from(left, 'utf8');
+    const rightBuffer = Buffer.from(right, 'utf8');
+
+    if (leftBuffer.length !== rightBuffer.length) {
+      return false;
+    }
+
+    if (leftBuffer.length === 0) {
+      return true;
+    }
+
+    return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Parses and validates the structure of an X-Stellar-Signature header value.
+ * Returns a structured error for malformed headers that should be rejected with HTTP 400.
+ */
+export function parseWebhookSignatureHeader(
+  headerValue: unknown
+): { ok: true; parsed: ParsedWebhookHeader } | { ok: false; reason: string } {
+  if (headerValue === null || headerValue === undefined) {
+    return { ok: false, reason: 'Missing signature header' };
+  }
+
+  if (typeof headerValue !== 'string') {
+    return { ok: false, reason: 'Signature header must be a string' };
+  }
+
+  if (headerValue.length === 0) {
+    return { ok: false, reason: 'Empty signature header' };
+  }
+
+  if (headerValue.length > MAX_WEBHOOK_HEADER_LENGTH) {
+    return { ok: false, reason: 'Signature header exceeds maximum length' };
+  }
+
+  if (CONTROL_CHAR_REGEX.test(headerValue)) {
+    return { ok: false, reason: 'Signature header contains control characters' };
+  }
+
+  if (!headerValue.includes('t=') || !headerValue.includes('v1=')) {
+    return { ok: false, reason: 'Missing required signature fields' };
+  }
+
+  const parts = headerValue.split(',');
+  if (parts.length < 2 || parts.length > 3) {
+    return { ok: false, reason: 'Invalid signature header segment count' };
+  }
+
+  let timestampPart: string | undefined;
+  let noncePart: string | undefined;
+  let signaturePart: string | undefined;
+
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) {
+      return { ok: false, reason: 'Empty signature header segment' };
+    }
+
+    if (trimmed.startsWith('t=')) {
+      if (timestampPart) {
+        return { ok: false, reason: 'Duplicate timestamp field' };
+      }
+      timestampPart = trimmed;
+      continue;
+    }
+
+    if (trimmed.startsWith('n=')) {
+      if (noncePart) {
+        return { ok: false, reason: 'Duplicate nonce field' };
+      }
+      noncePart = trimmed;
+      continue;
+    }
+
+    if (trimmed.startsWith('v1=')) {
+      if (signaturePart) {
+        return { ok: false, reason: 'Duplicate signature field' };
+      }
+      signaturePart = trimmed;
+      continue;
+    }
+
+    return { ok: false, reason: 'Unknown signature header segment' };
+  }
+
+  if (!timestampPart || !signaturePart) {
+    return { ok: false, reason: 'Missing required signature fields' };
+  }
+
+  const timestampRaw = timestampPart.slice(2);
+  if (!/^\d+$/.test(timestampRaw)) {
+    return { ok: false, reason: 'Invalid timestamp format' };
+  }
+
+  const timestamp = Number(timestampRaw);
+  if (!Number.isSafeInteger(timestamp) || timestamp <= 0) {
+    return { ok: false, reason: 'Invalid timestamp value' };
+  }
+
+  const signature = signaturePart.slice(3);
+  if (!SIGNATURE_HEX_REGEX.test(signature)) {
+    return { ok: false, reason: 'Invalid signature format' };
+  }
+
+  const nonce = noncePart ? noncePart.slice(2) : '';
+  if (nonce.length > MAX_NONCE_LENGTH) {
+    return { ok: false, reason: 'Nonce exceeds maximum length' };
+  }
+
+  if (nonce && CONTROL_CHAR_REGEX.test(nonce)) {
+    return { ok: false, reason: 'Nonce contains control characters' };
+  }
+
+  return {
+    ok: true,
+    parsed: {
+      timestamp,
+      nonce,
+      signature,
+    },
+  };
+}
+
+function validatePayload(payload: unknown): { ok: true; payload: string } | { ok: false; reason: string } {
+  const normalized = normalizePayload(payload);
+
+  if (normalized.length > MAX_WEBHOOK_PAYLOAD_LENGTH) {
+    return { ok: false, reason: 'Payload exceeds maximum length' };
+  }
+
+  return { ok: true, payload: normalized };
+}
+
+function verifyParsedSignature(
+  payload: string,
+  parsed: ParsedWebhookHeader,
+  secret: string,
+  toleranceMs: number,
+  nonceOverride?: string
+): boolean {
+  const nonce = parsed.nonce || nonceOverride || '';
+
+  if (Math.abs(Date.now() - parsed.timestamp) > toleranceMs) {
+    return false;
+  }
+
+  const expected = generateWebhookSignature(payload, secret, parsed.timestamp, nonce);
+  if (safeTimingSafeEqual(parsed.signature, expected.signature)) {
+    return true;
+  }
+
+  if (!parsed.nonce && !nonceOverride) {
+    const legacyExpected = generateWebhookSignature(payload, secret, parsed.timestamp, '');
+    return safeTimingSafeEqual(parsed.signature, legacyExpected.signature);
+  }
+
+  return false;
+}
+
+/**
+ * Evaluates webhook verification and maps the outcome to an HTTP status code.
+ * Malformed headers -> 400, invalid signatures -> 401, valid -> 200.
+ */
+export function evaluateWebhookVerification(
+  payload: unknown,
+  headerValue: unknown,
+  secret: unknown,
+  optionsOrTolerance: number | VerifyWebhookOptions = DEFAULT_DRIFT_TOLERANCE_MS
+): WebhookVerificationResult {
+  const payloadResult = validatePayload(payload);
+  if (!payloadResult.ok) {
+    return { status: 400, valid: false, error: payloadResult.reason };
+  }
+
+  if (typeof secret !== 'string' || secret.length === 0) {
+    return { status: 400, valid: false, error: 'Invalid webhook secret' };
+  }
+
+  const parseResult = parseWebhookSignatureHeader(headerValue);
+  if (!parseResult.ok) {
+    return { status: 400, valid: false, error: parseResult.reason };
+  }
+
+  const options: VerifyWebhookOptions =
+    typeof optionsOrTolerance === 'number'
+      ? { toleranceMs: optionsOrTolerance }
+      : (optionsOrTolerance ?? {});
+
+  const toleranceMs = options.toleranceMs ?? DEFAULT_DRIFT_TOLERANCE_MS;
+  const isValid = verifyParsedSignature(
+    payloadResult.payload,
+    parseResult.parsed,
+    secret,
+    toleranceMs,
+    options.nonce
+  );
+
+  if (!isValid) {
+    return { status: 401, valid: false, error: 'Invalid webhook signature' };
+  }
+
+  return { status: 200, valid: true };
+}
 
 let configuredKmsSigner: KmsWebhookSigner | null = null;
 
@@ -196,76 +436,69 @@ export async function verifyWebhookSignature(
   secret: string,
   optionsOrTolerance: number | VerifyWebhookOptions = DEFAULT_DRIFT_TOLERANCE_MS
 ): Promise<boolean> {
-  const options: VerifyWebhookOptions =
-    typeof optionsOrTolerance === 'number'
-      ? { toleranceMs: optionsOrTolerance }
-      : (optionsOrTolerance ?? {});
+  try {
+    const options: VerifyWebhookOptions =
+      typeof optionsOrTolerance === 'number'
+        ? { toleranceMs: optionsOrTolerance }
+        : (optionsOrTolerance ?? {});
 
-  const toleranceMs = options.toleranceMs ?? DEFAULT_DRIFT_TOLERANCE_MS;
-  const checkReplay = options.checkReplay ?? true;
-  const redisClient = options.redisClient ?? redis;
-  const kmsSigner = options.kmsSigner ?? configuredKmsSigner;
+    const toleranceMs = options.toleranceMs ?? DEFAULT_DRIFT_TOLERANCE_MS;
+    const checkReplay = options.checkReplay ?? true;
+    const redisClient = options.redisClient ?? redis;
+    const kmsSigner = options.kmsSigner ?? configuredKmsSigner;
 
-  if (!headerValue || !headerValue.includes('t=') || !headerValue.includes('v1=')) {
-    return false;
-  }
-
-  const parts = headerValue.split(',');
-  const timestampPart = parts.find((p) => p.startsWith('t='));
-  const noncePart = parts.find((p) => p.startsWith('n='));
-  const signaturePart = parts.find((p) => p.startsWith('v1='));
-
-  if (!timestampPart || !signaturePart) return false;
-
-  const timestamp = parseInt(timestampPart.substring(2), 10);
-  const signature = signaturePart.substring(3);
-  const nonce = noncePart ? noncePart.substring(2) : (options.nonce || '');
-
-  if (isNaN(timestamp)) return false;
-
-  if (Math.abs(Date.now() - timestamp) > toleranceMs) {
-    return false;
-  }
-
-  const dataToSign = buildWebhookDataToSign(payload, timestamp, nonce);
-  let signatureValid = false;
-
-  if (kmsSigner) {
-    signatureValid = await kmsSigner.verifyHmacSha256(dataToSign, signature);
-
-    if (!signatureValid && !noncePart && !options.nonce) {
-      const legacyDataToSign = buildWebhookDataToSign(payload, timestamp, '');
-      signatureValid = await kmsSigner.verifyHmacSha256(legacyDataToSign, signature);
-    }
-  } else {
-    const expected = generateWebhookSignature(payload, secret, timestamp, nonce);
-    const sigBuffer = Buffer.from(signature);
-    const expBuffer = Buffer.from(expected.signature);
-
-    if (sigBuffer.length === expBuffer.length && crypto.timingSafeEqual(sigBuffer, expBuffer)) {
-      signatureValid = true;
-    } else if (!noncePart && !options.nonce) {
-      const legacyExpected = generateWebhookSignature(payload, secret, timestamp, '');
-      const legacyExpBuffer = Buffer.from(legacyExpected.signature);
-      signatureValid =
-        sigBuffer.length === legacyExpBuffer.length &&
-        crypto.timingSafeEqual(sigBuffer, legacyExpBuffer);
-    }
-  }
-
-  if (!signatureValid) {
-    return false;
-  }
-
-  if (nonce && checkReplay) {
-    const ttlSeconds = Math.max(1, Math.ceil(toleranceMs / 1000));
-    const isFresh = await checkAndStoreNonce(nonce, ttlSeconds, redisClient);
-    if (!isFresh) {
+    const payloadResult = validatePayload(payload);
+    if (!payloadResult.ok) {
       return false;
     }
-  }
 
-  return true;
+    const parseResult = parseWebhookSignatureHeader(headerValue);
+    if (!parseResult.ok) {
+      return false;
+    }
+
+    const { timestamp, signature } = parseResult.parsed;
+    const nonce = parseResult.parsed.nonce || options.nonce || '';
+    let isValid = false;
+
+    if (kmsSigner) {
+      if (Math.abs(Date.now() - timestamp) > toleranceMs) {
+        return false;
+      }
+
+      const dataToSign = buildWebhookDataToSign(payloadResult.payload, timestamp, nonce);
+      isValid = await kmsSigner.verifyHmacSha256(dataToSign, signature);
+
+      if (!isValid && !parseResult.parsed.nonce && !options.nonce) {
+        const legacyDataToSign = buildWebhookDataToSign(payloadResult.payload, timestamp, '');
+        isValid = await kmsSigner.verifyHmacSha256(legacyDataToSign, signature);
+      }
+    } else {
+      isValid = verifyParsedSignature(
+        payloadResult.payload,
+        parseResult.parsed,
+        secret,
+        toleranceMs,
+        options.nonce
+      );
+    }
+
+    if (!isValid) {
+      return false;
+    }
+
+    if (nonce && checkReplay) {
+      const ttlSeconds = Math.max(1, Math.ceil(toleranceMs / 1000));
+      const isFresh = await checkAndStoreNonce(nonce, ttlSeconds, redisClient);
+      if (!isFresh) {
+        return false;
+      }
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -278,42 +511,25 @@ export function verifyWebhookSignatureSync(
   toleranceMs: number = DEFAULT_DRIFT_TOLERANCE_MS,
   nonceOverride?: string
 ): boolean {
-  if (!headerValue || !headerValue.includes('t=') || !headerValue.includes('v1=')) {
-    return false;
-  }
-
-  const parts = headerValue.split(',');
-  const timestampPart = parts.find((p) => p.startsWith('t='));
-  const noncePart = parts.find((p) => p.startsWith('n='));
-  const signaturePart = parts.find((p) => p.startsWith('v1='));
-
-  if (!timestampPart || !signaturePart) return false;
-
-  const timestamp = parseInt(timestampPart.substring(2), 10);
-  const signature = signaturePart.substring(3);
-  const nonce = noncePart ? noncePart.substring(2) : (nonceOverride || '');
-
-  if (isNaN(timestamp)) return false;
-
-  if (Math.abs(Date.now() - timestamp) > toleranceMs) {
-    return false;
-  }
-
-  const expected = generateWebhookSignature(payload, secret, timestamp, nonce);
-  const sigBuffer = Buffer.from(signature);
-  const expBuffer = Buffer.from(expected.signature);
-
-  if (sigBuffer.length !== expBuffer.length || !crypto.timingSafeEqual(sigBuffer, expBuffer)) {
-    if (!noncePart && !nonceOverride) {
-      const legacyExpected = generateWebhookSignature(payload, secret, timestamp, '');
-      const legacyExpBuffer = Buffer.from(legacyExpected.signature);
-      return (
-        sigBuffer.length === legacyExpBuffer.length &&
-        crypto.timingSafeEqual(sigBuffer, legacyExpBuffer)
-      );
+  try {
+    const payloadResult = validatePayload(payload);
+    if (!payloadResult.ok) {
+      return false;
     }
+
+    const parseResult = parseWebhookSignatureHeader(headerValue);
+    if (!parseResult.ok) {
+      return false;
+    }
+
+    return verifyParsedSignature(
+      payloadResult.payload,
+      parseResult.parsed,
+      secret,
+      toleranceMs,
+      nonceOverride
+    );
+  } catch {
     return false;
   }
-
-  return true;
 }

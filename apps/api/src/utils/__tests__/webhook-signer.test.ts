@@ -7,6 +7,8 @@ import {
   signWebhookPayload,
   configureKmsWebhookSigner,
   resetConfiguredKmsWebhookSigner,
+  evaluateWebhookVerification,
+  parseWebhookSignatureHeader,
 } from '../webhook-signer';
 import { createMockKmsHmacClient } from '../kms-signer';
 import { NONCE_PREFIX } from '../../lib/nonceCache';
@@ -186,6 +188,31 @@ describe('Webhook HMAC Signer & Replay Prevention', () => {
       it('should reject headers with invalid timestamp format', async () => {
         const header = `t=invalid_timestamp,n=123,v1=abc`;
         expect(await verifyWebhookSignature(payload, header, secret)).toBe(false);
+      });
+
+      it('should map malformed headers to HTTP 400 via evaluateWebhookVerification', () => {
+        expect(evaluateWebhookVerification(payload, '', secret).status).toBe(400);
+        expect(evaluateWebhookVerification(payload, 'invalid_header', secret).status).toBe(400);
+        expect(evaluateWebhookVerification(payload, 't=abc,v1=short', secret).status).toBe(400);
+      });
+
+      it('should map invalid signatures to HTTP 401 via evaluateWebhookVerification', () => {
+        const now = Date.now();
+        const result = generateWebhookSignature(payload, secret, now);
+        const evaluation = evaluateWebhookVerification(payload, result.headerValue, 'wrong_secret');
+        expect(evaluation.status).toBe(401);
+        expect(evaluation.valid).toBe(false);
+      });
+
+      it('should parse valid webhook signature headers', () => {
+        const now = Date.now();
+        const result = generateWebhookSignature(payload, secret, now);
+        const parsed = parseWebhookSignatureHeader(result.headerValue);
+        expect(parsed.ok).toBe(true);
+        if (parsed.ok) {
+          expect(parsed.parsed.timestamp).toBe(now);
+          expect(parsed.parsed.signature).toHaveLength(64);
+        }
       });
     });
   });
