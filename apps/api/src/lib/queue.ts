@@ -2,7 +2,8 @@ import { Queue, QueueEvents, Job, Worker } from "bullmq";
 import { Resend } from "resend";
 import CircuitBreaker from "opossum";
 import { prisma } from "./prisma";
-import { signWebhookPayload } from "../utils/webhook-signer";
+import { generateWebhookSignature } from "../utils/webhook-signer";
+import { applyWebhookPayloadTemplate } from "../utils/payload-template";
 import { adaptiveWebhookRateLimiter, waitForAdaptiveBackoff } from "../utils/rate-limiter";
 
 export interface AlertJobData {
@@ -176,8 +177,22 @@ export async function dispatchWebhookAndLog(webhookId: string, payload: any, ret
       await waitForAdaptiveBackoff(adaptiveDelayMs);
     }
 
-    const payloadString = JSON.stringify(payload);
-    const signature = await signWebhookPayload(payloadString, { secret: webhook.secret });
+    const templateResult = applyWebhookPayloadTemplate(payload, webhook.payloadTemplate);
+    if (!templateResult.ok) {
+      console.warn(
+        `[WebhookDispatch] Payload template error for webhook ${webhookId}: ${templateResult.error}`,
+      );
+      await prisma.webhookLog.create({
+        data: {
+          webhookId,
+          error: `Payload template ${templateResult.phase} error: ${templateResult.error}`,
+        },
+      });
+      return;
+    }
+
+    const payloadString = templateResult.body;
+    const signature = generateWebhookSignature(payloadString, webhook.secret);
 
     const breaker = await getOrCreateCircuitBreaker(webhookId);
     const response = await breaker.fire(webhook.url, payloadString, {

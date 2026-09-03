@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { prisma } from '../../lib/prisma';
-import { signWebhookPayload } from '../../utils/webhook-signer';
+import { generateWebhookSignature } from '../../utils/webhook-signer';
+import { validateHandlebarsTemplate } from '../../utils/payload-template';
 
 export interface WebhookTestResult {
   success: boolean;
@@ -59,8 +60,16 @@ export class WebhooksService {
     };
   }
 
-  async addWebhook(userId: string, url: string) {
+  async addWebhook(userId: string, url: string, payloadTemplate?: string) {
     console.log(`[WebhooksService] Registering webhook ${url} for user ${userId}`);
+
+    if (payloadTemplate) {
+      const validation = validateHandlebarsTemplate(payloadTemplate);
+      if (!validation.ok) {
+        throw new Error(`Invalid payload template: ${validation.error}`);
+      }
+    }
+
     const secret = crypto.randomBytes(32).toString('hex');
 
     const webhook = await prisma.webhook.create({
@@ -68,10 +77,12 @@ export class WebhooksService {
         userId,
         url,
         secret,
+        payloadTemplate,
       },
       select: {
         id: true,
         url: true,
+        payloadTemplate: true,
         isActive: true,
         createdAt: true,
       },
