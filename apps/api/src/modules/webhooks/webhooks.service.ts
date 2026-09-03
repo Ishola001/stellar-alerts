@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { prisma } from '../../lib/prisma';
-import { generateWebhookSignature } from '../../utils/webhook-signer';
+import { signWebhookPayload } from '../../utils/webhook-signer';
 
 export interface WebhookTestResult {
   success: boolean;
@@ -159,7 +159,7 @@ export class WebhooksService {
       },
     });
 
-    const signature = generateWebhookSignature(payload, webhook.secret);
+    const signature = await signWebhookPayload(payload, { secret: webhook.secret });
 
     try {
       const response = await fetch(webhook.url, {

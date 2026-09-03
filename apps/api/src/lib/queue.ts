@@ -2,7 +2,7 @@ import { Queue, QueueEvents, Job, Worker } from "bullmq";
 import { Resend } from "resend";
 import CircuitBreaker from "opossum";
 import { prisma } from "./prisma";
-import { generateWebhookSignature } from "../utils/webhook-signer";
+import { signWebhookPayload } from "../utils/webhook-signer";
 import { adaptiveWebhookRateLimiter, waitForAdaptiveBackoff } from "../utils/rate-limiter";
 
 export interface AlertJobData {
@@ -177,7 +177,7 @@ export async function dispatchWebhookAndLog(webhookId: string, payload: any, ret
     }
 
     const payloadString = JSON.stringify(payload);
-    const signature = generateWebhookSignature(payloadString, webhook.secret);
+    const signature = await signWebhookPayload(payloadString, { secret: webhook.secret });
 
     const breaker = await getOrCreateCircuitBreaker(webhookId);
     const response = await breaker.fire(webhook.url, payloadString, {
