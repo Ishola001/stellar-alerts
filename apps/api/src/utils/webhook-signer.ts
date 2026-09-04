@@ -2,6 +2,12 @@ import crypto from 'crypto';
 import type Redis from 'ioredis';
 import { redis } from '../lib/redis';
 import { checkAndStoreNonce, generateNonce } from '../lib/nonceCache';
+import {
+  createKmsWebhookSigner,
+  KmsHmacClient,
+  KmsProvider,
+  KmsWebhookSigner,
+} from './kms-signer';
 
 export interface WebhookHeaderResult {
   signature: string;
@@ -16,6 +22,22 @@ export interface VerifyWebhookOptions {
   secondaryHeaderValue?: string;
   checkReplay?: boolean;
   redisClient?: Redis;
+  kmsSigner?: KmsWebhookSigner;
+}
+
+export interface SignWebhookPayloadOptions {
+  secret?: string;
+  timestamp?: number;
+  nonce?: string;
+  kmsSigner?: KmsWebhookSigner;
+  kmsKeyId?: string;
+}
+
+export interface KmsWebhookSigningEnv {
+  enabled: boolean;
+  provider?: KmsProvider;
+  primaryKeyId?: string;
+  previousKeyIds?: string[];
 }
 
 export interface ParsedWebhookHeader {
@@ -290,6 +312,72 @@ export function evaluateWebhookVerification(
   return { status: 200, valid: true };
 }
 
+let configuredKmsSigner: KmsWebhookSigner | null = null;
+
+export function buildWebhookDataToSign(
+  payload: string,
+  timestamp: number,
+  nonce: string
+): string {
+  return nonce ? `${timestamp}.${nonce}.${payload}` : `${timestamp}.${payload}`;
+}
+
+export function buildWebhookHeaderValue(
+  timestamp: number,
+  nonce: string,
+  signature: string
+): string {
+  return nonce
+    ? `t=${timestamp},n=${nonce},v1=${signature}`
+    : `t=${timestamp},v1=${signature}`;
+}
+
+export function parseKmsWebhookSigningEnv(env: NodeJS.ProcessEnv = process.env): KmsWebhookSigningEnv {
+  const enabled = env.KMS_WEBHOOK_SIGNING_ENABLED === 'true';
+  const previousKeyIds = env.KMS_PREVIOUS_KEY_IDS
+    ? env.KMS_PREVIOUS_KEY_IDS.split(',').map((keyId) => keyId.trim()).filter(Boolean)
+    : [];
+
+  return {
+    enabled,
+    provider: env.KMS_PROVIDER as KmsProvider | undefined,
+    primaryKeyId: env.KMS_PRIMARY_KEY_ID,
+    previousKeyIds,
+  };
+}
+
+export function configureKmsWebhookSigner(
+  client: KmsHmacClient,
+  env: NodeJS.ProcessEnv = process.env
+): KmsWebhookSigner | null {
+  const kmsEnv = parseKmsWebhookSigningEnv(env);
+  if (!kmsEnv.enabled || !kmsEnv.provider || !kmsEnv.primaryKeyId) {
+    configuredKmsSigner = null;
+    return null;
+  }
+
+  configuredKmsSigner = createKmsWebhookSigner({
+    provider: kmsEnv.provider,
+    primaryKeyId: kmsEnv.primaryKeyId,
+    previousKeyIds: kmsEnv.previousKeyIds,
+    client,
+  });
+
+  return configuredKmsSigner;
+}
+
+export function getConfiguredKmsWebhookSigner(): KmsWebhookSigner | null {
+  return configuredKmsSigner;
+}
+
+export function resetConfiguredKmsWebhookSigner(): void {
+  configuredKmsSigner = null;
+}
+
+function computeLocalHmacSignature(dataToSign: string, secret: string): string {
+  return crypto.createHmac('sha256', secret).update(dataToSign).digest('hex');
+}
+
 /**
  * Generates an HMAC SHA256 signature for a webhook payload with a UUIDv4 nonce
  * and Unix timestamp to prevent payload spoofing and replay attacks.
@@ -305,12 +393,31 @@ export function generateWebhookSignature(
   timestamp: number = Date.now(),
   nonce: string = generateNonce()
 ): WebhookHeaderResult {
-  const hmac = crypto.createHmac('sha256', secret);
-  const dataToSign = nonce ? `${timestamp}.${nonce}.${payload}` : `${timestamp}.${payload}`;
-  const signature = hmac.update(dataToSign).digest('hex');
-  const headerValue = nonce
-    ? `t=${timestamp},n=${nonce},v1=${signature}`
-    : `t=${timestamp},v1=${signature}`;
+  const dataToSign = buildWebhookDataToSign(payload, timestamp, nonce);
+  const signature = computeLocalHmacSignature(dataToSign, secret);
+  const headerValue = buildWebhookHeaderValue(timestamp, nonce, signature);
+
+  return {
+    signature,
+    timestamp,
+    nonce,
+    headerValue,
+  };
+}
+
+/**
+ * Generates a webhook signature using a hardware-backed KMS/HSM key.
+ * The raw signing key never enters application memory.
+ */
+export async function generateWebhookSignatureKms(
+  payload: string,
+  kmsSigner: KmsWebhookSigner,
+  timestamp: number = Date.now(),
+  nonce: string = generateNonce()
+): Promise<WebhookHeaderResult> {
+  const dataToSign = buildWebhookDataToSign(payload, timestamp, nonce);
+  const signature = await kmsSigner.signHmacSha256(dataToSign);
+  const headerValue = buildWebhookHeaderValue(timestamp, nonce, signature);
 
   return {
     signature,
@@ -411,6 +518,28 @@ export class KeyRotationManager {
 }
 
 /**
+ * Signs a webhook payload using KMS when configured, otherwise falls back to the local secret.
+ */
+export async function signWebhookPayload(
+  payload: string,
+  options: SignWebhookPayloadOptions = {}
+): Promise<WebhookHeaderResult> {
+  const timestamp = options.timestamp ?? Date.now();
+  const nonce = options.nonce ?? generateNonce();
+  const kmsSigner = options.kmsSigner ?? configuredKmsSigner;
+
+  if (kmsSigner) {
+    return generateWebhookSignatureKms(payload, kmsSigner, timestamp, nonce);
+  }
+
+  if (!options.secret) {
+    throw new Error('Webhook signing secret is required when KMS signing is disabled');
+  }
+
+  return generateWebhookSignature(payload, options.secret, timestamp, nonce);
+}
+
+/**
  * Verifies an incoming webhook signature header against a secret key, enforcing:
  * 1. Correct HMAC SHA256 signature matching payload, timestamp, and nonce.
  * 2. 5-minute clock drift tolerance (fails if request is older than 5 minutes or in future).
@@ -437,6 +566,7 @@ export async function verifyWebhookSignature(
     const toleranceMs = options.toleranceMs ?? DEFAULT_DRIFT_TOLERANCE_MS;
     const checkReplay = options.checkReplay ?? true;
     const redisClient = options.redisClient ?? redis;
+    const kmsSigner = options.kmsSigner ?? configuredKmsSigner;
 
     const payloadResult = validatePayload(payload);
     if (!payloadResult.ok) {
