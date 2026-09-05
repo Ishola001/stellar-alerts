@@ -64,13 +64,6 @@ export class WebhooksService {
   async addWebhook(userId: string, url: string, payloadTemplate?: string) {
     console.log(`[WebhooksService] Registering webhook ${url} for user ${userId}`);
 
-    if (payloadTemplate) {
-      const validation = validateHandlebarsTemplate(payloadTemplate);
-      if (!validation.ok) {
-        throw new Error(`Invalid payload template: ${validation.error}`);
-      }
-    }
-
     const secret = crypto.randomBytes(32).toString('hex');
 
     const webhook = await prisma.webhook.create({
@@ -184,7 +177,7 @@ export class WebhooksService {
       'X-Stellar-Alerts-Nonce': signatures.primary.nonce,
     };
     if (signatures.secondary) {
-      headers['X-Signature-Secondary'] = signatures.secondary.headerValue;
+      headers['X-Stellar-Signature-Secondary'] = signatures.secondary.headerValue;
     }
 
     try {
